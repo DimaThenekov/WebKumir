@@ -1,1 +1,2 @@
 # WebKumir
+For kumir competitions
