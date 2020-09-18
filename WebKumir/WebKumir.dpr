@@ -1,7 +1,5 @@
 program WebKumir;
 {$APPTYPE CONSOLE}
-
-
 {$R *.dres}
 
 uses
@@ -40,6 +38,8 @@ type
     PFile: string;
     PFileName: string;
     isAdmin: boolean;
+    Pers: Array [0 .. 5] of longint;
+    Dors: string;
   end;
 
 var
@@ -49,8 +49,9 @@ var
   LoadDirectory: string;
   Players: Array Of TPlayer;
   reserv: array of TMemIniFile;
+  blacklisted: array of string;
   map: TMemIniFile;
-
+  ips : TStringList;
 function md5(s: string): string;
 begin
   Result := '';
@@ -71,6 +72,66 @@ end;
 function RegistrationHash(a, b: string): string;
 begin
   Result := md5('Hash:' + a + ';Password:' + b + ';');
+end;
+
+function DorIsOpen(a: TPlayer; s: string): boolean;
+var
+  ar: TArray<string>;
+  i: longint;
+begin
+
+  ar := a.Dors.Split([';']);
+  for i := Low(ar) to High(ar) do
+    if length(ar[i].Split([':'])) > 1 then
+      if ar[i].Split([':'])[0] = s then
+      begin
+        if ar[i].Split([':'])[1] = '0' then
+          Result := false;
+        if ar[i].Split([':'])[1] = '1' then
+          Result := true;
+        exit;
+      end;
+  a.Dors := a.Dors + s + ':0;'
+end;
+
+procedure DorClose(a: TPlayer; s: string);
+var
+  ar: TArray<string>;
+  i: longint;
+  s2: string;
+begin
+  DorIsOpen(a, s);
+  ar := a.Dors.Split([';']);
+  for i := Low(ar) to High(ar) do
+    if (length(ar[i].Split([':'])) > 1) and (ar[i].Split([':'])[0] = s) then
+    begin
+      s2 := s2 + ar[i].Split([':'])[0] + ':0;';
+      exit;
+    end
+    else
+    begin
+      s2 := s2 + ar[i] + ';'
+    end;
+end;
+
+procedure DorOpen(a: TPlayer; s: string);
+var
+  ar: TArray<string>;
+  i: longint;
+  s2: string;
+begin
+  DorIsOpen(a, s);
+  ar := a.Dors.Split([';']);
+  for i := Low(ar) to High(ar) do
+    if (length(ar[i].Split([':'])) > 1) and (ar[i].Split([':'])[0] = s) then
+    begin
+      s2 := s2 + ar[i].Split([':'])[0] + ':1;';
+      exit;
+    end
+    else
+    begin
+      s2 := s2 + ar[i] + ';'
+    end;
 end;
 
 function LoadFileToStr(const FileName: TFileName): String;
@@ -119,6 +180,20 @@ begin
     ini.WriteInteger('Player:' + i.ToString, 'posx', Players[i].posx);
     ini.WriteInteger('Player:' + i.ToString, 'posy', Players[i].posy);
     ini.WriteBool('Player:' + i.ToString, 'isAdmin', Players[i].isAdmin);
+    // -------
+    ini.WriteString('Player:' + i.ToString, 'dors', Players[i].Dors);
+    ini.WriteInteger('Player:' + i.ToString, 'personage_skin',
+      Players[i].Pers[0]);
+    ini.WriteInteger('Player:' + i.ToString, 'personage_hairstyle',
+      Players[i].Pers[1]);
+    ini.WriteInteger('Player:' + i.ToString, 'personage_eye',
+      Players[i].Pers[2]);
+    ini.WriteInteger('Player:' + i.ToString, 'personage_shirt',
+      Players[i].Pers[3]);
+    ini.WriteInteger('Player:' + i.ToString, 'personage_pants',
+      Players[i].Pers[4]);
+    ini.WriteInteger('Player:' + i.ToString, 'personage_footwear',
+      Players[i].Pers[5]);
   end;
 end;
 
@@ -141,6 +216,20 @@ begin
     Players[i].posy := ini.ReadInteger('Player:' + i.ToString, 'posy', 0);
     Players[i].isAdmin := ini.ReadBool('Player:' + i.ToString,
       'isAdmin', false);
+    // -------
+    Players[i].Dors := ini.ReadString('Player:' + i.ToString, 'dors', '');
+    Players[i].Pers[0] := ini.ReadInteger('Player:' + i.ToString,
+      'personage_skin', 50);
+    Players[i].Pers[1] := ini.ReadInteger('Player:' + i.ToString,
+      'personage_hairstyle', 6);
+    Players[i].Pers[2] := ini.ReadInteger('Player:' + i.ToString,
+      'personage_eye', 4);
+    Players[i].Pers[3] := ini.ReadInteger('Player:' + i.ToString,
+      'personage_shirt', 1);
+    Players[i].Pers[4] := ini.ReadInteger('Player:' + i.ToString,
+      'personage_pants', 2);
+    Players[i].Pers[5] := ini.ReadInteger('Player:' + i.ToString,
+      'personage_footwear', 4);
   end;
   ini.Free;
 end;
@@ -219,21 +308,22 @@ var
 var
   ZF: TZipFile;
 begin
-  //if not DirectoryExists(tosave) then
-  //  ForceDirectories(tosave);
+  // if not DirectoryExists(tosave) then
+  // ForceDirectories(tosave);
   stream := TResourceStream.Create(HInstance, resname, RT_RCDATA);
   ZF := TZipFile.Create();
   ZF.Open(stream, TZipMode.zmRead);
   ZF.ExtractAll(ExtractFilePath(ParamStr(0)));
   ZF.Close;
   ZF.Free;
-  RenameFile(ExtractFilePath(ParamStr(0))+'def',tosave);
+  RenameFile(ExtractFilePath(ParamStr(0)) + 'def', tosave);
 end;
 
-function InHouse(x, y: int64;n:string): boolean;
+function InHouse(x, y: int64; n: string): boolean;
 var
-  i, x1, y1, x2, y2: longint;
+  i, PlaInd, x1, y1, x2, y2: longint;
 begin
+  PlaInd := GetIndex(n);
   Result := false;
   for i := 0 to map.ReadInteger('Count', 'Room', 0) - 1 do
   begin
@@ -253,12 +343,14 @@ begin
     y1 := map.ReadInteger('RV:' + i.ToString, 'pos2', 0);
     y2 := map.ReadInteger('RV:' + i.ToString, 'pos3', 0);
 
-    if  map.ReadString('RV:' + i.ToString, 'dor', '')<>'open' then
-    if y=Floor((y1+y2)/2) then
-    begin
-      Result := false;
-      exit;
-    end;
+    if y = Floor((y1 + y2) / 2) then
+      if map.ReadString('RV:' + i.ToString, 'dor', '') <> '' then
+        if not DorIsOpen(Players[PlaInd], map.ReadString('RV:' + i.ToString,
+          'dor', '')) then
+        begin
+          Result := false;
+          exit;
+        end;
 
     if (x1 = x) and (y2 >= y) and (y >= y1) then
     begin
@@ -272,12 +364,14 @@ begin
     x1 := map.ReadInteger('RH:' + i.ToString, 'pos2', 0);
     x2 := map.ReadInteger('RH:' + i.ToString, 'pos3', 0);
 
-    if  map.ReadString('RH:' + i.ToString, 'dor', '')<>'open' then
-    if y=Floor((x1+x2)/2) then
-    begin
-      Result := false;
-      exit;
-    end;
+    if x = Floor((x1 + x2) / 2) then
+      if map.ReadString('RH:' + i.ToString, 'dor', '') <> '' then
+        if not DorIsOpen(Players[PlaInd], map.ReadString('RH:' + i.ToString,
+          'dor', '')) then
+        begin
+          Result := false;
+          exit;
+        end;
 
     if (y1 = y) and (x2 >= x) and (x >= x1) then
     begin
@@ -290,7 +384,9 @@ end;
 function LoadServFile(user, s: string): String;
 var
   i: longint;
+  userindex: longint;
 begin
+  userindex := GetIndex(user);
   Result := s;
   if s = 'login' then
     Result := 'OK'
@@ -331,8 +427,14 @@ begin
         map.ReadInteger('RV:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RV:' + i.ToString, 'pos2', 0).ToString + ',' +
         map.ReadInteger('RV:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
-      Result := Result + '      "dor": "' + map.ReadString('RV:' + i.ToString,
-        'dor', 'file:error') + '"' + #10#13;
+      if map.ReadString('RV:' + i.ToString, 'dor', '') = '' then
+        Result := Result + '      "dor": "open"' + #10#13
+      else if DorIsOpen(Players[userindex], map.ReadString('RV:' + i.ToString,
+        'dor', '')) then
+        Result := Result + '      "dor": "open"' + #10#13
+      else
+        Result := Result + '      "dor": "file:' +
+          map.ReadString('RV:' + i.ToString, 'dor', '') + '"' + #10#13;
       Result := Result + '    },' + #10#13;
     end;
     i := map.ReadInteger('Count', 'road vertical', 0) - 1;
@@ -343,8 +445,14 @@ begin
         map.ReadInteger('RV:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RV:' + i.ToString, 'pos2', 0).ToString + ',' +
         map.ReadInteger('RV:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
-      Result := Result + '      "dor": "' + map.ReadString('RV:' + i.ToString,
-        'dor', 'file:error') + '"' + #10#13;
+      if map.ReadString('RV:' + i.ToString, 'dor', '') = '' then
+        Result := Result + '      "dor": "open"' + #10#13
+      else if DorIsOpen(Players[userindex], map.ReadString('RV:' + i.ToString,
+        'dor', '')) then
+        Result := Result + '      "dor": "open"' + #10#13
+      else
+        Result := Result + '      "dor": "file:' +
+          map.ReadString('RV:' + i.ToString, 'dor', '') + '"' + #10#13;
       Result := Result + '    }' + #10#13;
     end;
     Result := Result + '  ],' + #10#13;
@@ -357,8 +465,14 @@ begin
         map.ReadInteger('RH:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RH:' + i.ToString, 'pos2', 0).ToString + ',' +
         map.ReadInteger('RH:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
-      Result := Result + '      "dor": "' + map.ReadString('RH:' + i.ToString,
-        'dor', 'file:error') + '"' + #10#13;
+      if map.ReadString('RH:' + i.ToString, 'dor', '') = '' then
+        Result := Result + '      "dor": "open"' + #10#13
+      else if DorIsOpen(Players[userindex], map.ReadString('RH:' + i.ToString,
+        'dor', '')) then
+        Result := Result + '      "dor": "open"' + #10#13
+      else
+        Result := Result + '      "dor": "file:' +
+          map.ReadString('RH:' + i.ToString, 'dor', '') + '"' + #10#13;
       Result := Result + '    },' + #10#13;
     end;
     i := map.ReadInteger('Count', 'road vertical', 0) - 1;
@@ -369,8 +483,14 @@ begin
         map.ReadInteger('RH:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RH:' + i.ToString, 'pos2', 0).ToString + ',' +
         map.ReadInteger('RH:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
-      Result := Result + '      "dor": "' + map.ReadString('RH:' + i.ToString,
-        'dor', 'file:error') + '"' + #10#13;
+      if map.ReadString('RH:' + i.ToString, 'dor', '') = '' then
+        Result := Result + '      "dor": "open"' + #10#13
+      else if DorIsOpen(Players[userindex], map.ReadString('RH:' + i.ToString,
+        'dor', '')) then
+        Result := Result + '      "dor": "open"' + #10#13
+      else
+        Result := Result + '      "dor": "file:' +
+          map.ReadString('RH:' + i.ToString, 'dor', '') + '"' + #10#13;
       Result := Result + '    }' + #10#13;
     end;
     Result := Result + '  ]' + #10#13;
@@ -380,8 +500,8 @@ begin
   else if s = 'move_down' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx, Players[GetIndex(user)].posy + 1,user)
-    then
+    if InHouse(Players[GetIndex(user)].posx, Players[GetIndex(user)].posy + 1,
+      user) then
       inc(Players[GetIndex(user)].posy)
     else
       Result := 'STOP';
@@ -389,8 +509,8 @@ begin
   else if s = 'move_left' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx - 1, Players[GetIndex(user)].posy,user)
-    then
+    if InHouse(Players[GetIndex(user)].posx - 1, Players[GetIndex(user)].posy,
+      user) then
       inc(Players[GetIndex(user)].posx, -1)
     else
       Result := 'STOP';
@@ -398,8 +518,8 @@ begin
   else if s = 'move_rigth' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx + 1, Players[GetIndex(user)].posy,user)
-    then
+    if InHouse(Players[GetIndex(user)].posx + 1, Players[GetIndex(user)].posy,
+      user) then
       inc(Players[GetIndex(user)].posx)
     else
       Result := 'STOP';
@@ -407,8 +527,8 @@ begin
   else if s = 'move_up' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx, Players[GetIndex(user)].posy - 1,user)
-    then
+    if InHouse(Players[GetIndex(user)].posx, Players[GetIndex(user)].posy - 1,
+      user) then
       inc(Players[GetIndex(user)].posy, -1)
     else
       Result := 'STOP';
@@ -426,6 +546,18 @@ begin
         ',' + #10#13;
       Result := Result + '      "posy": ' + Players[i].posy.ToString +
         ',' + #10#13;
+      Result := Result + '      "personage1": ' + Players[i].Pers[0].ToString +
+        ',' + #10#13;
+      Result := Result + '      "personage2": ' + Players[i].Pers[1].ToString +
+        ',' + #10#13;
+      Result := Result + '      "personage3": ' + Players[i].Pers[2].ToString +
+        ',' + #10#13;
+      Result := Result + '      "personage4": ' + Players[i].Pers[3].ToString +
+        ',' + #10#13;
+      Result := Result + '      "personage5": ' + Players[i].Pers[4].ToString +
+        ',' + #10#13;
+      Result := Result + '      "personage6": ' + Players[i].Pers[5].ToString +
+        ',' + #10#13;
       if Players[i].isAdmin then
         Result := Result + '      "isAdmin": "true"' + #10#13
       else
@@ -435,13 +567,26 @@ begin
 
     end;
     i := High(Players);
-    Result := Result + '  "Player:' + i.ToString +
-      '": [' + #10#13;
+    Result := Result + '  "Player:' + i.ToString + '": [' + #10#13;
     Result := Result + '    {' + #10#13;
     Result := Result + '      "Name": "' + Players[i].name + '",' + #10#13;
     Result := Result + '      "posx": ' + Players[i].posx.ToString +
       ',' + #10#13;
+    Result := Result + '      "posy": ' + Players[i].posy.ToString + ','
+      + #10#13;
     Result := Result + '      "posy": ' + Players[i].posy.ToString +
+      ',' + #10#13;
+    Result := Result + '      "personage1": ' + Players[i].Pers[0].ToString +
+      ',' + #10#13;
+    Result := Result + '      "personage2": ' + Players[i].Pers[1].ToString +
+      ',' + #10#13;
+    Result := Result + '      "personage3": ' + Players[i].Pers[2].ToString +
+      ',' + #10#13;
+    Result := Result + '      "personage4": ' + Players[i].Pers[3].ToString +
+      ',' + #10#13;
+    Result := Result + '      "personage5": ' + Players[i].Pers[4].ToString +
+      ',' + #10#13;
+    Result := Result + '      "personage6": ' + Players[i].Pers[5].ToString +
       ',' + #10#13;
     if Players[i].isAdmin then
       Result := Result + '      "isAdmin": "true"' + #10#13
@@ -450,6 +595,17 @@ begin
     Result := Result + '    }' + #10#13;
     Result := Result + '  ]' + #10#13;
     Result := Result + '}';
+  end
+  else if length(s.Split(['EditPersonage'])) > 1 then
+  if length(s.Split(['EditPersonage'])[1].Split([';'])) > 5 then
+  begin
+    Players[userindex].Pers[0]:=s.Split(['EditPersonage'])[1].Split([';'])[0].ToInteger;
+    Players[userindex].Pers[1]:=s.Split(['EditPersonage'])[1].Split([';'])[1].ToInteger;
+    Players[userindex].Pers[2]:=s.Split(['EditPersonage'])[1].Split([';'])[2].ToInteger;
+    Players[userindex].Pers[3]:=s.Split(['EditPersonage'])[1].Split([';'])[3].ToInteger;
+    Players[userindex].Pers[4]:=s.Split(['EditPersonage'])[1].Split([';'])[4].ToInteger;
+    Players[userindex].Pers[5]:=s.Split(['EditPersonage'])[1].Split([';'])[5].ToInteger;
+    Result := 'OK';
   end;
 end;
 
@@ -459,6 +615,17 @@ var
   img: boolean;
   i, index: longint;
 begin
+  for I := 0 to Length(blacklisted) - 1 do
+    If blacklisted[I] = AThread.Binding.PeerIP Then
+    begin
+      AThread.Connection.Disconnect; // or raise an Exception...
+      exit;
+    end;
+ if ips.Values[AThread.Binding.PeerIP]<>'' then
+  ips.Values[AThread.Binding.PeerIP]:=IntToStr(StrToInt(ips.Values[AThread.Binding.PeerIP])+1)
+ else
+  ips.Values[AThread.Binding.PeerIP]:='0';
+  //writeln(AThread.Binding.PeerIP);
   if (ARequestInfo.URI = '\') or (ARequestInfo.URI = '/') or
     (ARequestInfo.URI = '') then
   begin
@@ -488,6 +655,8 @@ begin
     begin
       index := GetIndex(ARequestInfo.URI.Split(['commands/'])
         [1].Split(['/', '\'])[0]);
+      if (index=-1) then
+        exit;
       AResponseInfo.ContentType := 'text/html; charset=utf-8';
       AResponseInfo.ContentText := md5(IntToStr(random(10000000)));
       Players[index].PFileName := RegistrationHash(AResponseInfo.ContentText,
@@ -568,7 +737,7 @@ var
   myi, myj: longint;
   task: ITask;
   iswork: boolean;
-
+  str:string;
 var
   files: TStringDynArray;
   bestindex: longint;
@@ -587,6 +756,8 @@ begin
       end;
       SaveAll(false);
     end);
+  ips:= TStringList.Create;
+  setlength(blacklisted,0);
   iswork := true;
   task.Start;
   writeln('For help use command "help"');
@@ -655,10 +826,10 @@ begin
               map.WriteInteger('Room:0', 'Pos2', -3);
               map.WriteInteger('Room:0', 'Pos3', 3);
               map.WriteInteger('Room:0', 'Pos4', 3);
-              map.UpdateFile;
               writeln('...OK');
 
             end;
+            map.UpdateFile;
 
             if FileExists(ExtractFilePath(ParamStr(0)) + command.Split([' '])[1]
               + '\save\defaut.ini') then
@@ -706,11 +877,11 @@ begin
           writeln('s - Stop http server');
           writeln('r <port> - Run http server');
           writeln('exit - Stop server and go to menu');
-          writeln('=================================');
+          writeln('=============BACKUP=============');
           writeln('save - New backup');
           writeln('lres - Get list of backup');
           writeln('lres <file> - set defaut file');
-          writeln('=================================');
+          writeln('=============PLAYER=============');
           writeln('list - List all user');
           writeln('add <login> <password> - Add user');
           writeln('del <login> 123456789 987654321 - Delete user');
@@ -718,7 +889,14 @@ begin
           writeln('rep <login> <password> <password> - Change password user');
           writeln('op <login> - Grants operator(admin) status to a player.');
           writeln('deop <login> - Revokes operator(admin) status from a player.');
+          writeln('===============IP===============');
+          writeln('banip - Write blacklist');
+          writeln('banip <ip> - Add an IP address to the server blacklist (not saved after restart)');
+          writeln('iplist - Write iplist');
+          writeln('cleariplist - Clear iplist');
           // ZipToFiles(
+
+          setlength(blacklisted,0);
         end
         else if (command.Split([' '])[0] = 'lres') then
         begin
@@ -875,9 +1053,38 @@ begin
             for myj := length(Players[myi].password) to 13 do
               write(' ');
             if Players[myi].isAdmin then
-              write('|  true  |')
+              writeln('|  true  |')
             else
-              write('| false  |');
+              writeln('| false  |');
+          end;
+        end
+        else if (command.Split([' '])[0] = 'banip') then
+        begin
+          if (length(command.Split([' '])) = 2) then
+          begin
+            writeln('adding');
+            setlength(blacklisted,length(blacklisted)+1);
+            blacklisted[High(blacklisted)]:= command.Split([' '])[1];
+            writeln('....OK');
+          end
+          else
+            for str in blacklisted do
+              writeln(str);
+        end
+        else if (command.Split([' '])[0] = 'iplist') then
+        begin
+          ips.Sort;
+          for myi := 0 to ips.Count-1 do
+          begin
+            writeln(ips.Names[myi]+' - '+ips.ValueFromIndex[myi]);
+          end;
+        end
+        else if (command.Split([' '])[0] = 'cleariplist') then
+        begin
+          ips.Clear;
+          for myi := 0 to ips.Count-1 do
+          begin
+            writeln(ips.Names[myi]+' - '+ips.ValueFromIndex[myi]);
           end;
         end
         else
