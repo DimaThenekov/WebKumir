@@ -18,7 +18,9 @@ uses
   System.Threading,
   IniFiles,
   DateUtils,
-  Math;
+  Math,
+  IdGlobal,
+  IdURI;
 
 Type
   TCommandHandler = class
@@ -29,6 +31,18 @@ Type
 {$R *.res}
 
 type
+
+  TProgram = class
+  public
+    programm: string;
+    exit_data: string;
+    res: string;
+    task: integer;
+    date: int64;
+  end;
+
+  Aarraofint = array of longint;
+
   TPlayer = class
   public
     name: string;
@@ -39,7 +53,13 @@ type
     PFileName: string;
     isAdmin: boolean;
     Pers: Array [0 .. 5] of longint;
-    Dors: string;
+    Dors: array of boolean;
+    Scores: int64;
+    Fine: int64;
+    LastProg: string;
+    // Progs: string;
+    // kumirprogs: Aarraofint;
+    programs: array of TProgram;
   end;
 
 var
@@ -50,8 +70,11 @@ var
   Players: Array Of TPlayer;
   reserv: array of TMemIniFile;
   blacklisted: array of string;
+  tasks: array of string;
   map: TMemIniFile;
-  ips : TStringList;
+  ips: TStringList;
+  // ProgremNum: longint = 0;
+
 function md5(s: string): string;
 begin
   Result := '';
@@ -76,61 +99,41 @@ end;
 
 function DorIsOpen(a: TPlayer; s: string): boolean;
 var
-  ar: TArray<string>;
   i: longint;
 begin
-
-  ar := a.Dors.Split([';']);
-  for i := Low(ar) to High(ar) do
-    if length(ar[i].Split([':'])) > 1 then
-      if ar[i].Split([':'])[0] = s then
-      begin
-        if ar[i].Split([':'])[1] = '0' then
-          Result := false;
-        if ar[i].Split([':'])[1] = '1' then
-          Result := true;
-        exit;
-      end;
-  a.Dors := a.Dors + s + ':0;'
+  for i := Low(tasks) to High(tasks) do
+    if tasks[i] = s then
+    begin
+      if a.Dors[i] then
+        Result := true
+      else
+        Result := false;
+      exit;
+    end;
+  Result := false;
 end;
 
 procedure DorClose(a: TPlayer; s: string);
 var
-  ar: TArray<string>;
   i: longint;
-  s2: string;
 begin
-  DorIsOpen(a, s);
-  ar := a.Dors.Split([';']);
-  for i := Low(ar) to High(ar) do
-    if (length(ar[i].Split([':'])) > 1) and (ar[i].Split([':'])[0] = s) then
+  for i := Low(tasks) to High(tasks) do
+    if tasks[i] = s then
     begin
-      s2 := s2 + ar[i].Split([':'])[0] + ':0;';
+      a.Dors[i] := false;
       exit;
-    end
-    else
-    begin
-      s2 := s2 + ar[i] + ';'
     end;
 end;
 
 procedure DorOpen(a: TPlayer; s: string);
 var
-  ar: TArray<string>;
   i: longint;
-  s2: string;
 begin
-  DorIsOpen(a, s);
-  ar := a.Dors.Split([';']);
-  for i := Low(ar) to High(ar) do
-    if (length(ar[i].Split([':'])) > 1) and (ar[i].Split([':'])[0] = s) then
+  for i := Low(tasks) to High(tasks) do
+    if tasks[i] = s then
     begin
-      s2 := s2 + ar[i].Split([':'])[0] + ':1;';
+      a.Dors[i] := true;
       exit;
-    end
-    else
-    begin
-      s2 := s2 + ar[i] + ';'
     end;
 end;
 
@@ -170,7 +173,7 @@ end;
 
 procedure saveini(var ini: TMemIniFile);
 var
-  i: longint;
+  i, j: longint;
 begin
   ini.WriteInteger('Players', 'count', length(Players));
   for i := 0 to High(Players) do
@@ -181,7 +184,9 @@ begin
     ini.WriteInteger('Player:' + i.ToString, 'posy', Players[i].posy);
     ini.WriteBool('Player:' + i.ToString, 'isAdmin', Players[i].isAdmin);
     // -------
-    ini.WriteString('Player:' + i.ToString, 'dors', Players[i].Dors);
+    for j := 0 to High(tasks) do
+      ini.WriteBool('Player:' + i.ToString, 'dors' + j.ToString,
+        Players[i].Dors[i]);
     ini.WriteInteger('Player:' + i.ToString, 'personage_skin',
       Players[i].Pers[0]);
     ini.WriteInteger('Player:' + i.ToString, 'personage_hairstyle',
@@ -199,9 +204,58 @@ end;
 
 procedure Loadini(s: string);
 var
-  i: longint;
+  i, g, j: longint;
+  instr: boolean;
+  mys, ss, lastss: ansistring;
   ini: TMemIniFile;
 begin
+  // ---------
+  mys := LoadFileToStr(ExtractFilePath(ParamStr(0)) + LoadDirectory +
+    '\index\task\all.json');
+  g := 0;
+  instr := false;
+  ss := '';
+  lastss := '';
+  i := 1;
+  SetLength(tasks, 0);
+  while i <= length(mys) do
+  begin
+    if mys[i] = '\' then
+    begin
+      i := i + 2;
+      continue;
+    end;
+    if instr then
+    begin
+      if (mys[i] = '"') or (mys[i] = '''') then
+      begin
+        if (g = 2) and (lastss = 'name') then
+        begin
+          SetLength(tasks, length(tasks) + 1);
+          tasks[High(tasks)] := ss;
+        end;
+        instr := false;
+        lastss := ss;
+        ss := '';
+      end;
+      ss := ss + mys[i];
+    end
+    else
+    begin
+      if (mys[i] = '[') or (mys[i] = '{') then
+        g := g + 1;
+      if (mys[i] = '}') or (mys[i] = ']') then
+        g := g - 1;
+      if (mys[i] = '"') or (mys[i] = '''') then
+      begin
+        instr := true;
+        ss := '';
+      end;
+
+    end;
+    i := i + 1;
+  end;
+  // ---------
   ini := TMemIniFile.Create(s);
   for i := Low(Players) to High(Players) do
     Players[i].Free;
@@ -217,7 +271,10 @@ begin
     Players[i].isAdmin := ini.ReadBool('Player:' + i.ToString,
       'isAdmin', false);
     // -------
-    Players[i].Dors := ini.ReadString('Player:' + i.ToString, 'dors', '');
+    SetLength(Players[i].Dors, length(tasks));
+    for j := 0 to High(tasks) do
+      Players[i].Dors[j] := ini.ReadBool('Player:' + i.ToString,
+        'dors' + j.ToString, false);
     Players[i].Pers[0] := ini.ReadInteger('Player:' + i.ToString,
       'personage_skin', 50);
     Players[i].Pers[1] := ini.ReadInteger('Player:' + i.ToString,
@@ -232,6 +289,7 @@ begin
       'personage_footwear', 4);
   end;
   ini.Free;
+  // tasks
 end;
 
 procedure SaveAll(isauto: boolean = false);
@@ -247,7 +305,7 @@ begin
         reserv[0].Free;
         for i := 1 to High(reserv) do
           reserv[i - 1] := reserv[i];
-        SetLength(reserv, 0);
+        // SetLength(reserv, 1);
       end
       else
         SetLength(reserv, length(reserv) + 1);
@@ -258,7 +316,6 @@ begin
       begin
         reserv[High(reserv)].UpdateFile;
         map.UpdateFile;
-        writeln('');
         writeln('Autosave');
       end;
     end
@@ -381,9 +438,218 @@ begin
   end;
 end;
 
+procedure delElem(var a: Aarraofint; Index: integer);
+var
+  Last: integer;
+begin
+  Last := high(a);
+  if Index < Last then
+    move(a[Index + 1], a[Index], (Last - Index) * sizeof(a[Index]));
+  SetLength(a, Last);
+end;
+
+function GetSortPlayers(): ansistring;
+var
+  a, max_time, min_time: array of int64;
+  i, j, k, m: longint;
+  time: int64;
+begin
+  SetLength(a, length(tasks));
+  SetLength(max_time, length(tasks));
+  for i := 0 to High(tasks) do
+    max_time[i] := 0;
+  SetLength(min_time, length(tasks));
+  for i := 0 to High(min_time) do
+    min_time[i] := 9223372036854775807;
+  Result :='names;scores;fine;';
+  for i := 0 to High(tasks) do
+    Result:=Result+tasks[i]+';';
+  Result := Result+ #13#10;
+  for i := 0 to High(Players) do
+  begin
+    Players[i].Scores := 0;
+    for j := 0 to High(Players[i].programs) do
+      if Players[i].programs[j].res = 'OK' then
+      begin
+        inc(a[Players[i].programs[j].task]);
+        if (max_time[Players[i].programs[j].task] < Players[i].programs[j].date)
+        then
+          max_time[Players[i].programs[j].task] := Players[i].programs[j].date;
+        if (min_time[Players[i].programs[j].task] > Players[i].programs[j].date)
+        then
+          min_time[Players[i].programs[j].task] := Players[i].programs[j].date;
+        inc(Players[i].Scores, 100);
+      end;
+  end;
+  for i := 0 to High(Players) do
+  begin
+    Players[i].Fine := 0;
+    m := 0;
+    for j := 0 to High(Players[i].programs) do
+      if Players[i].programs[j].res = 'OK' then
+      begin
+        m := m + 1;
+        time := Players[i].programs[j].date;
+        k := Players[i].programs[j].task;
+        if (a[Players[i].programs[j].task] <= 1) then
+          inc(Players[i].Fine, 1000)
+        else
+          inc(Players[i].Fine,
+            Floor((1 - (time - min_time[k]) / (max_time[k] - min_time[k])) *
+            1000 + ((time - min_time[k]) / (max_time[k] - min_time[k])) *
+            (250 / a[k] + 750)));
+
+      end;
+    Players[i].Fine := m * 1000 - Players[i].Fine;
+
+  end;
+  for i := 0 to High(Players) do
+  begin
+    Result := Result+ Players[i].name+';'+Players[i].Scores.ToString+';'+Players[i].Fine.ToString+';';
+    for j := 0 to High(Players[i].Dors) do
+      if Players[i].Dors[j] then
+        Result := Result+ '100;'
+      else
+        Result := Result+ '0;';
+    Result := Result+ #13#10;
+  end;
+
+
+end;
+
+function SaveServFile(user, s, prog: string): String;
+var
+  i, j: longint;
+  userindex: longint;
+begin
+  // s = upload;kumir;B1;
+  // s = upload;js;2134;
+  Result := s;
+  if (length(s.Split([';'])) <= 2) then
+  begin
+    Result := 'error1';
+    exit;
+  end;
+  if (s.Split([';'])[0] <> 'upload') or
+    ((s.Split([';'])[1] <> 'res') and (s.Split([';'])[1] <> 'kumir')) then
+  begin
+    Result := 'error2';
+    exit;
+  end;
+
+  userindex := GetIndex(user);
+  writeln('s = ', s);
+  writeln('prog = ', prog);
+  if s.Split([';'])[1] = 'kumir' then
+  begin
+    if DorIsOpen(Players[userindex], s.Split([';'])[2]) then
+    begin
+      Result := 'Эта задача уже решена';
+      exit;
+    end;
+    If (Players[userindex].LastProg <> prog) then
+    begin
+      // inc(ProgremNum);
+      for i := 0 to High(Players[userindex].programs) do
+        if Not((Players[userindex].programs[i].res='OK')or(Players[userindex].programs[i].res[1]='E')) then
+        begin
+                Result := 'Дождитесь завершения проверки всех задач';
+                exit;
+        end;
+      Players[userindex].LastProg := prog;
+      // Players[userindex].Progs := Players[userindex].Progs +
+      // ProgremNum.ToString + ';';
+      SetLength(Players[userindex].programs,
+        length(Players[userindex].programs) + 1);
+      Players[userindex].programs[High(Players[userindex].programs)] :=
+        TProgram.Create;
+
+      Players[userindex].programs[High(Players[userindex].programs)].programm :=
+        TIdURI.URLDecode(StringReplace(prog, '+', ' ',
+        [rfReplaceAll, rfIgnoreCase]));
+      Players[userindex].programs[High(Players[userindex].programs)].task := -1;
+      for i := 0 to High(tasks) do
+        if tasks[i] = s.Split([';'])[2] then
+          Players[userindex].programs[High(Players[userindex].programs)
+            ].task := i;
+      if Players[userindex].programs[High(Players[userindex].programs)].task = -1
+      then
+      begin
+        Result := 'Данной задачи не найдено';
+        SetLength(Players[userindex].programs,
+          length(Players[userindex].programs) - 1);
+        exit;
+      end;
+      Players[userindex].programs[High(Players[userindex].programs)].res
+        := 'Queue';
+      Players[userindex].programs[High(Players[userindex].programs)].date :=
+        DateTimeToUnix(Now());
+      // add to 1 stek
+      // lol;
+      Result := 'Программа отправлена';
+    end
+    else
+      Result := 'Эта программа уже была отправлена';
+  end
+  else if s.Split([';'])[1] = 'res' then
+  begin
+    if Players[userindex].isAdmin then
+    begin
+      if not TryStrToInt(s.Split([';'])[2],i) then
+      begin
+        Result := 'Except';
+        exit;
+      end;
+      if not TryStrToInt(s.Split([';'])[2],j) then
+      begin
+        Result := 'Except';
+        exit;
+      end;
+
+      i := StrToInt(s.Split([';'])[2]) div 10000000;
+      j := StrToInt(s.Split([';'])[2]) mod 10000000;
+      if Low(Players) > i then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+      if High(Players) < i then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+      if Low(Players[i].programs) > j then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+      if High(Players[i].programs) < j then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+
+      if prog <> '' then
+      begin
+        Players[i].programs[j].res := 'Error ' + s.Split([';'])[3];
+        Players[i].programs[j].exit_data :=
+          TIdURI.URLDecode(StringReplace(prog, '+', ' ',
+          [rfReplaceAll, rfIgnoreCase]));
+      end
+      else
+      begin
+        Players[i].programs[j].res := 'OK';
+        DorOpen(Players[i], tasks[Players[i].programs[j].task]);
+      end;
+      Result := 'OK';
+
+    end;
+  end;
+end;
+
 function LoadServFile(user, s: string): String;
 var
-  i: longint;
+  i, j: longint;
   userindex: longint;
 begin
   userindex := GetIndex(user);
@@ -393,124 +659,122 @@ begin
   else if s = 'map' then
   begin
     // Result := LoadFileToStr(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\save\map.txt')
-    Result := '{' + #10#13 + '  "rooms": [' + #10#13;
+    Result := '{' + #13#10 + '  "rooms": [' + #13#10;
     for i := 0 to map.ReadInteger('Count', 'Room', 0) - 2 do
     begin
-      Result := Result + '    {' + #10#13;
+      Result := Result + '    {' + #13#10;
       Result := Result + '      "position": [' +
         map.ReadInteger('Room:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('Room:' + i.ToString, 'pos2', 0).ToString + ',' +
         map.ReadInteger('Room:' + i.ToString, 'pos3', 0).ToString + ',' +
         map.ReadInteger('Room:' + i.ToString, 'pos4', 0).ToString + ']'
-        + #10#13;
-      Result := Result + '    },' + #10#13;
+        + #13#10;
+      Result := Result + '    },' + #13#10;
     end;
     i := map.ReadInteger('Count', 'Room', 0) - 1;
     if i >= 0 then
     begin
-      Result := Result + '    {' + #10#13;
+      Result := Result + '    {' + #13#10;
       Result := Result + '      "position": [' +
         map.ReadInteger('Room:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('Room:' + i.ToString, 'pos2', 0).ToString + ',' +
         map.ReadInteger('Room:' + i.ToString, 'pos3', 0).ToString + ',' +
         map.ReadInteger('Room:' + i.ToString, 'pos4', 0).ToString + ']'
-        + #10#13;
-      Result := Result + '    }' + #10#13;
+        + #13#10;
+      Result := Result + '    }' + #13#10;
     end;
-    Result := Result + '  ],' + #10#13;
+    Result := Result + '  ],' + #13#10;
     // ===================================
-    Result := Result + '  "road vertical": [' + #10#13;
+    Result := Result + '  "road vertical": [' + #13#10;
     for i := 0 to map.ReadInteger('Count', 'road vertical', 0) - 2 do
     begin
-      Result := Result + '    {' + #10#13;
+      Result := Result + '    {' + #13#10;
       Result := Result + '      "position": [' +
         map.ReadInteger('RV:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RV:' + i.ToString, 'pos2', 0).ToString + ',' +
-        map.ReadInteger('RV:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
+        map.ReadInteger('RV:' + i.ToString, 'pos3', 0).ToString + '],' + #13#10;
       if map.ReadString('RV:' + i.ToString, 'dor', '') = '' then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else if DorIsOpen(Players[userindex], map.ReadString('RV:' + i.ToString,
         'dor', '')) then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else
         Result := Result + '      "dor": "file:' +
-          map.ReadString('RV:' + i.ToString, 'dor', '') + '"' + #10#13;
-      Result := Result + '    },' + #10#13;
+          map.ReadString('RV:' + i.ToString, 'dor', '') + '"' + #13#10;
+      Result := Result + '    },' + #13#10;
     end;
     i := map.ReadInteger('Count', 'road vertical', 0) - 1;
     if i >= 0 then
     begin
-      Result := Result + '    {' + #10#13;
+      Result := Result + '    {' + #13#10;
       Result := Result + '      "position": [' +
         map.ReadInteger('RV:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RV:' + i.ToString, 'pos2', 0).ToString + ',' +
-        map.ReadInteger('RV:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
+        map.ReadInteger('RV:' + i.ToString, 'pos3', 0).ToString + '],' + #13#10;
       if map.ReadString('RV:' + i.ToString, 'dor', '') = '' then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else if DorIsOpen(Players[userindex], map.ReadString('RV:' + i.ToString,
         'dor', '')) then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else
         Result := Result + '      "dor": "file:' +
-          map.ReadString('RV:' + i.ToString, 'dor', '') + '"' + #10#13;
-      Result := Result + '    }' + #10#13;
+          map.ReadString('RV:' + i.ToString, 'dor', '') + '"' + #13#10;
+      Result := Result + '    }' + #13#10;
     end;
-    Result := Result + '  ],' + #10#13;
+    Result := Result + '  ],' + #13#10;
     // ===================================
-    Result := Result + '  "road horizontal": [' + #10#13;
+    Result := Result + '  "road horizontal": [' + #13#10;
     for i := 0 to map.ReadInteger('Count', 'road horizontal', 0) - 2 do
     begin
-      Result := Result + '    {' + #10#13;
+      Result := Result + '    {' + #13#10;
       Result := Result + '      "position": [' +
         map.ReadInteger('RH:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RH:' + i.ToString, 'pos2', 0).ToString + ',' +
-        map.ReadInteger('RH:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
+        map.ReadInteger('RH:' + i.ToString, 'pos3', 0).ToString + '],' + #13#10;
       if map.ReadString('RH:' + i.ToString, 'dor', '') = '' then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else if DorIsOpen(Players[userindex], map.ReadString('RH:' + i.ToString,
         'dor', '')) then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else
         Result := Result + '      "dor": "file:' +
-          map.ReadString('RH:' + i.ToString, 'dor', '') + '"' + #10#13;
-      Result := Result + '    },' + #10#13;
+          map.ReadString('RH:' + i.ToString, 'dor', '') + '"' + #13#10;
+      Result := Result + '    },' + #13#10;
     end;
     i := map.ReadInteger('Count', 'road vertical', 0) - 1;
     if i >= 0 then
     begin
-      Result := Result + '    {' + #10#13;
+      Result := Result + '    {' + #13#10;
       Result := Result + '      "position": [' +
         map.ReadInteger('RH:' + i.ToString, 'pos1', 0).ToString + ',' +
         map.ReadInteger('RH:' + i.ToString, 'pos2', 0).ToString + ',' +
-        map.ReadInteger('RH:' + i.ToString, 'pos3', 0).ToString + '],' + #10#13;
+        map.ReadInteger('RH:' + i.ToString, 'pos3', 0).ToString + '],' + #13#10;
       if map.ReadString('RH:' + i.ToString, 'dor', '') = '' then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else if DorIsOpen(Players[userindex], map.ReadString('RH:' + i.ToString,
         'dor', '')) then
-        Result := Result + '      "dor": "open"' + #10#13
+        Result := Result + '      "dor": "open"' + #13#10
       else
         Result := Result + '      "dor": "file:' +
-          map.ReadString('RH:' + i.ToString, 'dor', '') + '"' + #10#13;
-      Result := Result + '    }' + #10#13;
+          map.ReadString('RH:' + i.ToString, 'dor', '') + '"' + #13#10;
+      Result := Result + '    }' + #13#10;
     end;
-    Result := Result + '  ]' + #10#13;
+    Result := Result + '  ]' + #13#10;
 
     Result := Result + '}';
   end
   else if s = 'move_down' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx, Players[GetIndex(user)].posy + 1,
-      user) then
-      inc(Players[GetIndex(user)].posy)
+    if InHouse(Players[userindex].posx, Players[userindex].posy + 1, user) then
+      inc(Players[userindex].posy)
     else
       Result := 'STOP';
   end
   else if s = 'move_left' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx - 1, Players[GetIndex(user)].posy,
-      user) then
+    if InHouse(Players[userindex].posx - 1, Players[userindex].posy, user) then
       inc(Players[GetIndex(user)].posx, -1)
     else
       Result := 'STOP';
@@ -518,8 +782,7 @@ begin
   else if s = 'move_rigth' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx + 1, Players[GetIndex(user)].posy,
-      user) then
+    if InHouse(Players[userindex].posx + 1, Players[userindex].posy, user) then
       inc(Players[GetIndex(user)].posx)
     else
       Result := 'STOP';
@@ -527,85 +790,209 @@ begin
   else if s = 'move_up' then
   begin
     Result := 'OK';
-    if InHouse(Players[GetIndex(user)].posx, Players[GetIndex(user)].posy - 1,
-      user) then
-      inc(Players[GetIndex(user)].posy, -1)
+    if InHouse(Players[userindex].posx, Players[userindex].posy - 1, user) then
+      inc(Players[userindex].posy, -1)
     else
       Result := 'STOP';
   end
   else if s = 'getpos' then
   begin
-    Result := '{' + #10#13 + '  "count": ' + length(Players).ToString;
+    Result := '{' + #13#10 + '  "count": ' + length(Players).ToString;
     for i := Low(Players) to High(Players) - 1 do
     begin
-      Result := Result + ',' + #10#13 + '  "Player:' + i.ToString +
-        '": [' + #10#13;
-      Result := Result + '    {' + #10#13;
-      Result := Result + '      "Name": "' + Players[i].name + '",' + #10#13;
+      Result := Result + ',' + #13#10 + '  "Player:' + i.ToString +
+        '": [' + #13#10;
+      Result := Result + '    {' + #13#10;
+      Result := Result + '      "Name": "' + Players[i].name + '",' + #13#10;
       Result := Result + '      "posx": ' + Players[i].posx.ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       Result := Result + '      "posy": ' + Players[i].posy.ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       Result := Result + '      "personage1": ' + Players[i].Pers[0].ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       Result := Result + '      "personage2": ' + Players[i].Pers[1].ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       Result := Result + '      "personage3": ' + Players[i].Pers[2].ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       Result := Result + '      "personage4": ' + Players[i].Pers[3].ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       Result := Result + '      "personage5": ' + Players[i].Pers[4].ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       Result := Result + '      "personage6": ' + Players[i].Pers[5].ToString +
-        ',' + #10#13;
+        ',' + #13#10;
       if Players[i].isAdmin then
-        Result := Result + '      "isAdmin": "true"' + #10#13
+        Result := Result + '      "isAdmin": "true"' + #13#10
       else
-        Result := Result + '      "isAdmin": "false"' + #10#13;
-      Result := Result + '    }' + #10#13;
-      Result := Result + '  ],' + #10#13;
+        Result := Result + '      "isAdmin": "false"' + #13#10;
+      Result := Result + '    }' + #13#10;
+      Result := Result + '  ],' + #13#10;
 
     end;
     i := High(Players);
-    Result := Result + '  "Player:' + i.ToString + '": [' + #10#13;
-    Result := Result + '    {' + #10#13;
-    Result := Result + '      "Name": "' + Players[i].name + '",' + #10#13;
+    Result := Result + '  "Player:' + i.ToString + '": [' + #13#10;
+    Result := Result + '    {' + #13#10;
+    Result := Result + '      "Name": "' + Players[i].name + '",' + #13#10;
     Result := Result + '      "posx": ' + Players[i].posx.ToString +
-      ',' + #10#13;
-    Result := Result + '      "posy": ' + Players[i].posy.ToString + ','
-      + #10#13;
+      ',' + #13#10;
     Result := Result + '      "posy": ' + Players[i].posy.ToString +
-      ',' + #10#13;
+      ',' + #13#10;
+    Result := Result + '      "posy": ' + Players[i].posy.ToString +
+      ',' + #13#10;
     Result := Result + '      "personage1": ' + Players[i].Pers[0].ToString +
-      ',' + #10#13;
+      ',' + #13#10;
     Result := Result + '      "personage2": ' + Players[i].Pers[1].ToString +
-      ',' + #10#13;
+      ',' + #13#10;
     Result := Result + '      "personage3": ' + Players[i].Pers[2].ToString +
-      ',' + #10#13;
+      ',' + #13#10;
     Result := Result + '      "personage4": ' + Players[i].Pers[3].ToString +
-      ',' + #10#13;
+      ',' + #13#10;
     Result := Result + '      "personage5": ' + Players[i].Pers[4].ToString +
-      ',' + #10#13;
+      ',' + #13#10;
     Result := Result + '      "personage6": ' + Players[i].Pers[5].ToString +
-      ',' + #10#13;
+      ',' + #13#10;
     if Players[i].isAdmin then
-      Result := Result + '      "isAdmin": "true"' + #10#13
+      Result := Result + '      "isAdmin": "true"' + #13#10
     else
-      Result := Result + '      "isAdmin": "false"' + #10#13;
-    Result := Result + '    }' + #10#13;
-    Result := Result + '  ]' + #10#13;
+      Result := Result + '      "isAdmin": "false"' + #13#10;
+    Result := Result + '    }' + #13#10;
+    Result := Result + '  ]' +#13#10;
     Result := Result + '}';
   end
-  else if length(s.Split(['EditPersonage'])) > 1 then
-  if length(s.Split(['EditPersonage'])[1].Split([';'])) > 5 then
+  else if (length(s.Split(['EditPersonage'])) > 1) and
+    (length(s.Split(['EditPersonage'])[1].Split([';'])) > 5) then
   begin
-    Players[userindex].Pers[0]:=s.Split(['EditPersonage'])[1].Split([';'])[0].ToInteger;
-    Players[userindex].Pers[1]:=s.Split(['EditPersonage'])[1].Split([';'])[1].ToInteger;
-    Players[userindex].Pers[2]:=s.Split(['EditPersonage'])[1].Split([';'])[2].ToInteger;
-    Players[userindex].Pers[3]:=s.Split(['EditPersonage'])[1].Split([';'])[3].ToInteger;
-    Players[userindex].Pers[4]:=s.Split(['EditPersonage'])[1].Split([';'])[4].ToInteger;
-    Players[userindex].Pers[5]:=s.Split(['EditPersonage'])[1].Split([';'])[5].ToInteger;
+    Players[userindex].Pers[0] := s.Split(['EditPersonage'])[1].Split([';'])
+      [0].ToInteger;
+    Players[userindex].Pers[1] := s.Split(['EditPersonage'])[1].Split([';'])
+      [1].ToInteger;
+    Players[userindex].Pers[2] := s.Split(['EditPersonage'])[1].Split([';'])
+      [2].ToInteger;
+    Players[userindex].Pers[3] := s.Split(['EditPersonage'])[1].Split([';'])
+      [3].ToInteger;
+    Players[userindex].Pers[4] := s.Split(['EditPersonage'])[1].Split([';'])
+      [4].ToInteger;
+    Players[userindex].Pers[5] := s.Split(['EditPersonage'])[1].Split([';'])
+      [5].ToInteger;
     Result := 'OK';
+  end
+  else if (length(s.Split(['Get_my_programs'])) > 1) then
+  begin
+    Result := '[';
+    j := 0;
+    for i := High(Players[userindex].programs)
+      downto Low(Players[userindex].programs) do
+      if tasks[Players[userindex].programs[i].task]
+        = s.Split(['Get_my_programs'])[1] then
+      begin
+        inc(j);
+        if j > 50 then
+          break;
+        Result := Result + '[' + i.ToString() + ',"' + Players[userindex]
+          .programs[i].res + '","' + Players[userindex].programs[i]
+          .date.ToString + '"]';
+        Result := Result + ',';
+
+      end;
+    if Result[length(Result)] = ',' then
+      delete(Result, length(Result), 1);
+    Result := Result + ']';
+
+  end
+  else if Players[userindex].isAdmin then
+  begin
+    { if (length(s.Split(['SendResults'])) > 1) then
+      // SendResultsB1;Admin;1;2134  SendResultsB1;Admin;0;2134   SendResultsB1;Admmin;0;2134
+      if (length(s.Split(['SendResults'])[1].Split([';'])) > 3) then
+      if GetIndex(s.Split(['SendResults'])[1].Split([';'])[1]) <> -1 then
+      begin
+      if DorIsOpen(Players[GetIndex(s.Split(['SendResults'])[1].Split([';'])
+      [1])], s.Split(['SendResults'])[1].Split([';'])[0]) then
+      begin
+      Result := 'DorIsOpen';
+      exit;
+      end;
+      if s.Split(['SendResults'])[1].Split([';'])[2] = '1' then
+      begin
+      programs[StrToInt(s.Split(['SendResults'])[1].Split([';'])[3])].res
+      := 'Successful';
+      inc(Players[GetIndex(s.Split(['SendResults'])[1].Split([';'])[1])
+      ].Scores, 10);
+      DorOpen(Players[GetIndex(s.Split(['SendResults'])[1].Split([';'])[1]
+      )], s.Split(['SendResults'])[1].Split([';'])[0]);
+      Result := 'Successful';
+      end
+      else
+      begin
+      programs[StrToInt(s.Split(['SendResults'])[1].Split([';'])[3])].res
+      := 'Task not completed';
+      inc(Players[GetIndex(s.Split(['SendResults'])[1].Split([';'])[1])
+      ].Scores, -1);
+      Result := 'Task not completed';
+      end;
+      end
+      else
+      writeln('User is not found'); }
+    if (length(s.Split(['GetFile'])) > 1) then
+    begin
+      if not FileExists(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index'
+        + StringReplace(s.Split(['GetFile'])[1], '$', '\',
+        [rfReplaceAll, rfIgnoreCase])) then
+      begin
+        Result := '404';
+        exit;
+      end
+      else
+      begin
+        Result := LoadFileToStr(ExtractFilePath(ParamStr(0)) + LoadDirectory +
+          '\index' + StringReplace(s.Split(['GetFile'])[1], '$', '\',
+          [rfReplaceAll, rfIgnoreCase]));
+        exit;
+      end;
+    end;
+    if (length(s.Split(['GetPrograms'])) > 1) then
+    begin
+      Result := ';';
+      for i := Low(Players) to High(Players) do // 10000000
+        for j := Low(Players[i].programs) to High(Players[i].programs) do
+          if (Players[i].programs[j].res = 'Queue') or
+            (Players[i].programs[j].res = 'Testing') then
+          begin
+            Result := Result + (i * 10000000 + j).ToString() + ';';
+          end;
+      exit;
+    end;
+    if (length(s.Split(['GetProgram'])) > 1) then
+    begin
+      i := StrToInt(s.Split(['GetProgram'])[1]) div 10000000;
+      j := StrToInt(s.Split(['GetProgram'])[1]) mod 10000000;
+      if Low(Players) > i then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+      if High(Players) < i then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+      if Low(Players[i].programs) > j then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+      if High(Players[i].programs) < j then
+      begin
+        Result := 'ProgNotFound';
+        exit;
+      end;
+      Players[i].programs[j].res := 'Testing';
+      Result := tasks[Players[i].programs[j].task] + #13#10 + Players[i]
+        .programs[j].programm;
+      exit;
+    end;
+
+    // DorOpen(GetIndex(s.Split(['SendSolution'])[1].Split([';'])[0]),GetIndex(s.Split(['SendSolution'])[1].Split([';'])[1]));
+
   end;
 end;
 
@@ -613,19 +1000,53 @@ procedure TCommandHandler.CommandGet(AThread: TIdContext;
   ARequestInfo: TIdHTTPRequestInfo; AResponseInfo: TIdHTTPResponseInfo);
 var
   img: boolean;
-  i, index: longint;
+  i, Index: longint;
+var
+  stream: TStream;
+  s: string;
 begin
-  for I := 0 to Length(blacklisted) - 1 do
-    If blacklisted[I] = AThread.Binding.PeerIP Then
+  // ========= ban list =========
+  for i := 0 to length(blacklisted) - 1 do
+    If blacklisted[i] = AThread.Binding.PeerIP Then
     begin
       AThread.Connection.Disconnect; // or raise an Exception...
       exit;
     end;
- if ips.Values[AThread.Binding.PeerIP]<>'' then
-  ips.Values[AThread.Binding.PeerIP]:=IntToStr(StrToInt(ips.Values[AThread.Binding.PeerIP])+1)
- else
-  ips.Values[AThread.Binding.PeerIP]:='0';
-  //writeln(AThread.Binding.PeerIP);
+  // ========= ban list =========
+  // ========= protect =========
+  if length(ARequestInfo.URI) = 0 then
+    exit;
+  if ARequestInfo.URI[1] <> '/' then
+    exit;
+  // ========= protect =========
+  // ========= ip list =========
+  if ips.Values[ARequestInfo.URI + ' ' + AThread.Binding.PeerIP] <> '' then
+    ips.Values[ARequestInfo.URI + ' ' + AThread.Binding.PeerIP] :=
+      IntToStr(StrToInt(ips.Values[ARequestInfo.URI + ' ' +
+      AThread.Binding.PeerIP]) + 1)
+  else
+    ips.Values[ARequestInfo.URI + ' ' + AThread.Binding.PeerIP] := '1';
+  // ========= ip list =========
+  if ARequestInfo.command = 'POST' then
+  begin
+    stream := ARequestInfo.PostStream;
+    if assigned(stream) then
+    begin
+      stream.Position := 0;
+      s := ReadStringFromStream(stream);
+      // TIdURI.URLDecode(StringReplace(ReadStringFromStream(stream), '+',
+      // ' ', [rfReplaceAll, rfIgnoreCase]));
+      // if length(ARequestInfo.URI.Split(['upload/'])[1].Split(['kumir/'])) > 1
+      // then
+      writeln(s);
+      // if length(ARequestInfo.URI.Split(['upload/'])[1].Split(['js/'])) > 1
+      // then
+      // получение решения
+    end;
+    // exit;
+  end;
+
+  // writeln(AThread.Binding.PeerIP);
   if (ARequestInfo.URI = '\') or (ARequestInfo.URI = '/') or
     (ARequestInfo.URI = '') then
   begin
@@ -635,14 +1056,25 @@ begin
   if length(ARequestInfo.URI.Split(['protect/'])) > 1 then
   begin
     AResponseInfo.ContentType := 'text/html; charset=utf-8';
+    AResponseInfo.ContentText := '__PrOtEcT_NoT_CoMpLeTeD__';
     for i := Low(Players) to High(Players) do
       if Players[i].PFileName <> '' then
         if Players[i].PFileName + '.txt' = ARequestInfo.URI.Split
           (['protect/'])[1] then
         begin
-          AResponseInfo.ContentText :=
-            LoadServFile(Players[i].PFile.Split(['/', '\'])[0],
-            Players[i].PFile.Split(['/', '\'])[1].Split(['.txt'])[0]);
+          if ARequestInfo.command = 'POST' then
+          begin
+            AResponseInfo.ContentText :=
+              SaveServFile(Players[i].PFile.Split(['/', '\'])[0],
+              Players[i].PFile.Split(['/', '\'])[1].Split(['.txt'])[0], s);
+            // if length(ARequestInfo.URI.Split(['upload/'])[1].Split(['js/'])) > 1
+            // then
+            // получение решения
+          end
+          else
+            AResponseInfo.ContentText :=
+              LoadServFile(Players[i].PFile.Split(['/', '\'])[0],
+              Players[i].PFile.Split(['/', '\'])[1].Split(['.txt'])[0]);
           Players[i].PFile := '';
           Players[i].PFileName := '';
           break;
@@ -655,16 +1087,28 @@ begin
     begin
       index := GetIndex(ARequestInfo.URI.Split(['commands/'])
         [1].Split(['/', '\'])[0]);
-      if (index=-1) then
+      if (index = -1) then
         exit;
       AResponseInfo.ContentType := 'text/html; charset=utf-8';
-      AResponseInfo.ContentText := md5(IntToStr(random(10000000)));
+      AResponseInfo.ContentText := md5(FloatToStr(random));
       Players[index].PFileName := RegistrationHash(AResponseInfo.ContentText,
         Players[index].password);
       Players[index].PFile := ARequestInfo.URI.Split(['commands/'])[1];
       exit;
     end;
+  if (Pos('__secret_information__', ARequestInfo.URI) > 0) then
+  begin
+    AResponseInfo.ContentText := '403';
+    AResponseInfo.ResponseNo := 403;
+    exit;
+  end;
+  if (Pos('top_data.json', ARequestInfo.URI) > 0) then
+  begin
+    AResponseInfo.ContentText := GetSortPlayers();
 
+    AResponseInfo.ResponseNo := 200;
+    exit;
+  end;
   if not FileExists(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
     ARequestInfo.URI) then
   begin
@@ -674,8 +1118,17 @@ begin
   end
   else
     AResponseInfo.ResponseNo := 200;
-
-  if Pos('.ICO', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  if Pos('.PDF', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  begin
+    AResponseInfo.ContentType := 'application/pdf';
+    AResponseInfo.ContentDisposition := 'inline; filename=' +
+      ExtractFileName(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
+      ARequestInfo.URI) + ';';
+    AResponseInfo.ServeFile(AThread, ExtractFilePath(ParamStr(0)) +
+      LoadDirectory + '\index' + ARequestInfo.URI);
+    exit;
+  end
+  else if Pos('.ICO', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'image/x-icon';
     img := true;
@@ -737,7 +1190,8 @@ var
   myi, myj: longint;
   task: ITask;
   iswork: boolean;
-  str:string;
+  str: string;
+
 var
   files: TStringDynArray;
   bestindex: longint;
@@ -756,8 +1210,9 @@ begin
       end;
       SaveAll(false);
     end);
-  ips:= TStringList.Create;
-  setlength(blacklisted,0);
+  ips := TStringList.Create;
+  // SetLength(kumirprogs, 0);
+  SetLength(blacklisted, 0);
   iswork := true;
   task.Start;
   writeln('For help use command "help"');
@@ -896,7 +1351,7 @@ begin
           writeln('cleariplist - Clear iplist');
           // ZipToFiles(
 
-          setlength(blacklisted,0);
+          SetLength(blacklisted, 0);
         end
         else if (command.Split([' '])[0] = 'lres') then
         begin
@@ -1042,8 +1497,8 @@ begin
         end
         else if (command.Split([' '])[0] = 'list') then
         begin
-          writeln('=====================================');
-          writeln('|   login   |   password   | isAmin |');
+          writeln('=============================================');
+          writeln('|   login   |   password   | isAmin | score |');
           for myi := 0 to High(Players) do
           begin
             write('|' + Players[myi].name);
@@ -1053,18 +1508,23 @@ begin
             for myj := length(Players[myi].password) to 13 do
               write(' ');
             if Players[myi].isAdmin then
-              writeln('|  true  |')
+              write('|  true  ')
             else
-              writeln('| false  |');
+              write('| false  ');
+            write('|' + Players[myi].Scores.ToString);
+            for myj := length(Players[myi].Scores.ToString) to 6 do
+              write(' ');
+            writeln('|');
           end;
+          writeln('=============================================');
         end
         else if (command.Split([' '])[0] = 'banip') then
         begin
           if (length(command.Split([' '])) = 2) then
           begin
             writeln('adding');
-            setlength(blacklisted,length(blacklisted)+1);
-            blacklisted[High(blacklisted)]:= command.Split([' '])[1];
+            SetLength(blacklisted, length(blacklisted) + 1);
+            blacklisted[High(blacklisted)] := command.Split([' '])[1];
             writeln('....OK');
           end
           else
@@ -1073,18 +1533,26 @@ begin
         end
         else if (command.Split([' '])[0] = 'iplist') then
         begin
+          ips.Sorted := false;
           ips.Sort;
-          for myi := 0 to ips.Count-1 do
+          for myj := 0 to ips.Count - 1 do
+            for myi := 1 to ips.Count - 1 do
+              if ips.ValueFromIndex[myi - 1] < ips.ValueFromIndex[myi] then
+              begin
+                ips.Exchange(myi - 1, myi);
+                // writeln(ips.Names[myi]+' - '+ips.ValueFromIndex[myi]);
+              end;
+          for myi := 0 to ips.Count - 1 do
           begin
-            writeln(ips.Names[myi]+' - '+ips.ValueFromIndex[myi]);
+            writeln(ips.Names[myi] + ' - ' + ips.ValueFromIndex[myi]);
           end;
         end
         else if (command.Split([' '])[0] = 'cleariplist') then
         begin
           ips.Clear;
-          for myi := 0 to ips.Count-1 do
+          for myi := 0 to ips.Count - 1 do
           begin
-            writeln(ips.Names[myi]+' - '+ips.ValueFromIndex[myi]);
+            writeln(ips.Names[myi] + ' - ' + ips.ValueFromIndex[myi]);
           end;
         end
         else
