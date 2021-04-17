@@ -20,7 +20,8 @@ uses
   DateUtils,
   Math,
   IdGlobal,
-  IdURI;
+  IdURI,
+  IdHTTPHeaderInfo;
 
 Type
   TCommandHandler = class
@@ -756,8 +757,10 @@ begin
 
   userindex := GetIndex(user);
 
-  writeln('s = ', s);
-  writeln('prog = ', prog);
+  //     writeln(logs, s);
+  writeln(logs,'pl = ', user);
+  writeln(logs,'s = ', s);
+  writeln(logs,'prog = ', prog);
   if s.Split([';'])[1] = 'kumir' then
   begin
     for i := 0 to High(tasks) do
@@ -1386,6 +1389,10 @@ var
 var
   stream: TStream;
   s: string;
+var
+  FS: TFileStream;
+  Range: TIdEntityRange;
+  StartPos, EndPos: Int64;
 begin
   // ========= ban list =========
   for i := 0 to length(blacklisted) - 1 do
@@ -1441,7 +1448,7 @@ begin
             exit;
           end;
 
-      writeln(logs, s);
+       writeln(logs, s);
       if length(s.Split(['errordamp'])) > 1 then
       begin
         DampIp.Values[AThread.Binding.PeerIP] :=
@@ -1531,6 +1538,94 @@ begin
   if Pos('.PDF', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'application/pdf';
+    AResponseInfo.ContentDisposition := 'inline; filename=' +
+      ExtractFileName(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
+      ARequestInfo.URI) + ';';
+    AResponseInfo.ServeFile(AThread, ExtractFilePath(ParamStr(0)) +
+      LoadDirectory + '\index' + ARequestInfo.URI);
+    exit;
+  end
+  else if Pos('.MP4', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  begin
+    // AResponseInfo.ContentType := 'video/mp4';
+    {AResponseInfo.ContentDisposition := 'inline; filename=' +
+      ExtractFileName(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
+      ARequestInfo.URI) + ';';
+    AResponseInfo.AcceptRanges := 'bytes';
+    AResponseInfo.ServeFile(AThread, ExtractFilePath(ParamStr(0)) +
+      LoadDirectory + '\index' + ARequestInfo.URI);     }
+
+    try
+      FS := TFileStream.Create(ExtractFilePath(ParamStr(0)) +
+      LoadDirectory + '\index' + ARequestInfo.URI,
+        fmOpenRead or fmShareDenyWrite);
+    except
+      AResponseInfo.ResponseNo := 500;
+      exit;
+    end;
+
+    AResponseInfo.ContentType := 'video/mp4';
+    AResponseInfo.AcceptRanges := 'bytes';
+    AResponseInfo.ContentDisposition := 'inline;';
+
+    if ARequestInfo.Ranges.Count = 1 then
+    begin
+      Range := ARequestInfo.Ranges.Ranges[0];
+
+      StartPos := Range.StartPos;
+      EndPos := Range.EndPos;
+
+      if StartPos >= 0 then
+      begin
+        // requesting prefix range from BOF
+        if EndPos >= 0 then
+          EndPos := IndyMin(EndPos, StartPos + (1024 * 1024 * 10) - 1)
+        else
+          EndPos := StartPos + (1024 * 1024 * 10) - 1;
+      end
+      else
+      begin
+        // requesting suffix range from EOF
+        if EndPos >= 0 then
+          EndPos := IndyMin(EndPos, 1024 * 1024 * 10)
+        else
+          EndPos := (1024 * 1024 * 10);
+      end;
+
+      AResponseInfo.ContentStream := TIdHTTPRangeStream.Create(FS,
+        StartPos, EndPos);
+      AResponseInfo.ResponseNo :=
+        TIdHTTPRangeStream(AResponseInfo.ContentStream).ResponseCode;
+
+      if AResponseInfo.ResponseNo = 206 then
+      begin
+        AResponseInfo.ContentRangeStart :=
+          TIdHTTPRangeStream(AResponseInfo.ContentStream).RangeStart;
+        AResponseInfo.ContentRangeEnd :=
+          TIdHTTPRangeStream(AResponseInfo.ContentStream).RangeEnd;
+        AResponseInfo.ContentRangeInstanceLength := FS.Size;
+      end;
+    end
+    else
+    begin
+      AResponseInfo.ContentStream := FS;
+      AResponseInfo.ResponseNo := 200;
+    end;
+    exit;
+  end
+  else if Pos('.AVI', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  begin
+    AResponseInfo.ContentType := 'video/x-msvideo';
+    AResponseInfo.ContentDisposition := 'inline; filename=' +
+      ExtractFileName(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
+      ARequestInfo.URI) + ';';
+    AResponseInfo.ServeFile(AThread, ExtractFilePath(ParamStr(0)) +
+      LoadDirectory + '\index' + ARequestInfo.URI);
+    exit;
+  end
+  else if Pos('.DOCX', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  begin
+    // AResponseInfo.ContentType := 'application/msword';
     AResponseInfo.ContentDisposition := 'inline; filename=' +
       ExtractFileName(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
       ARequestInfo.URI) + ';';
@@ -1844,9 +1939,9 @@ begin
             begin
               writeln('Файл успешно скопирован.');
               if FileExists(ExtractFilePath(ParamStr(0)) + LoadDirectory +
-              '\save\defaut.ini') then
+                '\save\defaut.ini') then
                 Loadini(ExtractFilePath(ParamStr(0)) + LoadDirectory +
-              '\save\defaut.ini')
+                  '\save\defaut.ini')
               else
               begin
                 writeln('Not found defaut save!!!');
