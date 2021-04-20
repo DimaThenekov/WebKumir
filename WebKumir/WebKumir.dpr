@@ -43,6 +43,7 @@ type
   end;
 
   Aarraofint = array of longint;
+  Aarraofstr = array of string;
 
   TPlayer = class
   public
@@ -99,6 +100,10 @@ var
   time_freeze: int64;
   time_end: int64;
   logs: text;
+  ArrForCaptcha: array of Aarraofstr;
+  WordsForCaptcha: Aarraofstr;
+  FileCaptcha: text;
+  canlogin: boolean;
   // ProgremNum: longint = 0;
 
 function md5(s: string): string;
@@ -121,6 +126,144 @@ end;
 function RegistrationHash(a, b: string): string;
 begin
   Result := md5('Hash:' + a + ';Password:' + b + ';');
+end;
+
+procedure iniarr(str: string);
+var
+  i, j: longint;
+  arrofstr: array of string;
+  getstr: string;
+  tagname: string;
+begin
+  str := trim(str) + #13#10;
+  SetLength(arrofstr, 0);
+  SetLength(WordsForCaptcha, 0);
+  SetLength(ArrForCaptcha, 0);
+  getstr := '';
+
+  for i := 1 to length(str) do
+    if (str[i] = #10) or (str[i] = #13) then
+    begin
+      if getstr <> '' then
+      begin
+        SetLength(arrofstr, length(arrofstr) + 1);
+        arrofstr[High(arrofstr)] := getstr;
+      end;
+      getstr := '';
+    end
+    else
+      getstr := getstr + str[i];
+  tagname := '';
+  for i := 0 to High(arrofstr) do
+    if (length(arrofstr[i]) > 5) and
+      ((arrofstr[i][1] = '<') and (arrofstr[i][2] = '!')) then
+    begin
+      if tagname = '' then
+      begin
+        for j := 3 to High(arrofstr[i]) - 1 do
+          tagname := tagname + arrofstr[i][j];
+        if tagname <> '_new_sting_s' then
+          if Pos('_new_sting_', tagname) > 0 then
+          begin
+            SetLength(ArrForCaptcha, length(ArrForCaptcha) + 1);
+            SetLength(ArrForCaptcha[High(ArrForCaptcha)], 1);
+            ArrForCaptcha[High(ArrForCaptcha)][0] := tagname[length(tagname)];
+          end;
+      end
+      else
+        tagname := '';
+    end
+    else if tagname = '_new_sting_s' then
+    begin
+      SetLength(WordsForCaptcha, length(WordsForCaptcha) + 1);
+      WordsForCaptcha[High(WordsForCaptcha)] := arrofstr[i];
+    end
+    else if Pos('_new_sting_', tagname) > 0 then
+    begin
+      SetLength(ArrForCaptcha[High(ArrForCaptcha)],
+        length(ArrForCaptcha[High(ArrForCaptcha)]) + 1);
+      ArrForCaptcha[High(ArrForCaptcha)
+        ][High(ArrForCaptcha[High(ArrForCaptcha)])] := arrofstr[i];
+    end;
+
+  // writeln(arrofstr[i]);
+
+end;
+
+function GenCaptcha(str: string; ans: boolean): string;
+var
+  i, j, k, start_pos: longint;
+  genkey: int64;
+  genword, spase: string;
+  strings: array [1 .. 12] of string;
+begin
+  str := md5(str);
+  genkey := 0;
+  for i := 1 to length(str) do
+  begin
+    if (str[i] >= 'a') and (str[i] <= 'f') then
+      genkey := genkey * 16 + (ord(str[i]) - ord('a') + 10);
+    if (str[i] >= '0') and (str[i] <= '9') then
+      genkey := genkey * 16 + (ord(str[i]) - ord('0'));
+    genkey := genkey mod 36028797018963970;
+  end;
+  genword := AnsiUpperCase
+    (WordsForCaptcha[((genkey mod 1048576) mod length(WordsForCaptcha))]);
+  if ans then
+  begin
+    Result := genword;
+    exit;
+  end;
+  genkey := genkey div 1048576;
+  for i := 1 to length(genword) do
+    for j := 0 to High(ArrForCaptcha) do
+      if ArrForCaptcha[j][0] = genword[i] then
+      begin
+        start_pos := (12 - High(ArrForCaptcha[j])) div 2;
+        spase := '';
+        for k := 1 to length(ArrForCaptcha[j][1].Split(['#'])
+          [1 + (genkey mod 14)]) do
+          spase := spase + ' ';
+        for k := 1 to High(ArrForCaptcha[j]) do
+          strings[start_pos + k] := strings[start_pos + k] + ArrForCaptcha[j][k]
+            .Split(['#'])[1 + (genkey mod 14)];
+        for k := 1 to start_pos do
+          strings[k] := strings[k] + spase;
+        for k := 12 downto 12 - start_pos + 1 -
+          ((12 - High(ArrForCaptcha[j])) mod 2) do
+          strings[k] := strings[k] + spase;
+        genkey := genkey div 14;
+        if genkey = 0 then
+          genkey := 100000000000000;
+      end;
+  // writeln(genkey);
+  Result := '';
+  for i := 1 to 12 do
+    Result := Result + strings[i] + #13#10;
+end;
+
+function ClearStr(str: string;
+  chars: string =
+  'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#№(){}[];:,.<>+/-=')
+  : string;
+var
+  symbols, textInEdit: String;
+  i: integer;
+begin
+  symbols := chars;
+  for i := 1 to length(str) do
+  begin
+    if (Pos(Copy(str, i, 1), symbols) = 0) then
+    // Если i-й символ отсутствует в наборе символов...
+    begin
+      textInEdit := str;
+      Delete(textInEdit, i, 1); // ...удаляем этот символ
+      str := textInEdit;
+      str := ClearStr(str);
+      break;
+    end;
+  end;
+  Result := str;
 end;
 
 function DorIsOpen(a: TPlayer; s: string): boolean;
@@ -488,6 +631,100 @@ begin
     end;
 end;
 
+function registering(str: TStrings): string;
+
+var
+  login, password, seed, answer, key: String;
+  i: integer;
+begin
+  // str.:=TEncoding.UTF8;
+  // TEncoding.Convert(TEncoding.GetEncoding(''))
+  login := '';
+  password := '';
+  seed := '0';
+  answer := '';
+  Result := 'OK';
+  for key in str do
+  begin
+    if key.Split(['='])[0] = 'login' then
+      login := key.Split(['='])[1];
+    if key.Split(['='])[0] = 'password' then
+      password := key.Split(['='])[1];
+    if key.Split(['='])[0] = 'seed' then
+      seed := key.Split(['='])[1];
+    if key.Split(['='])[0] = 'answer' then
+      answer := key.Split(['='])[1];
+  end;
+
+  if (length(login) >= 32) then
+    Result := 'log_not_valid';
+  if (length(password) >= 32) then
+    Result := 'pas_not_valid';
+  if (length(login) < 3) then
+    Result := 'log_not_valid';
+  if (length(password) < 3) then
+    Result := 'pas_not_valid';
+  if (length(seed) >= 32) then
+    Result := 'seed_not_valid';
+  if (length(answer) >= 128) then
+    Result := 'answer_not_valid';
+
+  if (login <> ClearStr(login)) then
+    Result := 'log_not_valid';
+  if (GetIndex(login) <> -1) then
+    Result := 'log_not_valid2';
+  if (password <> ClearStr(password)) then
+    Result := 'pas_not_valid';
+  if (seed <> ClearStr(seed, '0123456789')) then
+    Result := 'seed_not_valid';
+  if (answer <> ClearStr(answer, '-0123456789ABCDEF')) then
+    Result := 'answer_not_valid';
+  if Result = 'OK' then
+  begin
+    if answer = '' then
+    begin
+      Result := GenCaptcha('login:=' + login + 'password:=' + password +
+        'seed:=' + seed + ';', false);
+    end
+    else if AnsiUpperCase(TIdURI.URLDecode((answer.Replace('-', '%')))) <>
+      GenCaptcha('login:=' + login + 'password:=' + password + 'seed:=' + seed +
+      ';', true) then
+      Result := 'answer_not_valid2'
+    else
+    begin
+      writeln('adding');
+      SetLength(Players, length(Players) + 1);
+      Players[High(Players)] := TPlayer.Create;
+      Players[High(Players)].name := login;
+      Players[High(Players)].password := password;
+      Players[High(Players)].posx := 0;
+      Players[High(Players)].posy := 0;
+      Players[High(Players)].dollars := 0;
+      Players[High(Players)].isAdmin := false;
+      SetLength(Players[High(Players)].Dors, length(tasks));
+      SetLength(Players[High(Players)].IsAccess, length(tasks));
+      for i := 0 to High(tasks) do
+        Players[High(Players)].Dors[i] := false;
+      for i := 0 to High(tasks) do
+        Players[High(Players)].IsAccess[i] := false;
+      Players[High(Players)].Pers[0] := 59;
+      Players[High(Players)].Pers[1] := 1;
+      Players[High(Players)].Pers[2] := 7;
+      Players[High(Players)].Pers[3] := 16;
+      Players[High(Players)].Pers[4] := 5;
+      Players[High(Players)].Pers[5] := 2;
+      Players[High(Players)].Scores := 0;
+      Players[High(Players)].Fine := 0;
+      SetLength(Players[High(Players)].programs, 0);
+      writeln('login: ' + login);
+      writeln('password: ' + password);
+      writeln('....OK');
+    end;
+
+  end;
+
+end;
+
 function GetIP: String;
 begin
   TIdStack.IncUsage;
@@ -757,10 +994,10 @@ begin
 
   userindex := GetIndex(user);
 
-  //     writeln(logs, s);
-  writeln(logs,'pl = ', user);
-  writeln(logs,'s = ', s);
-  writeln(logs,'prog = ', prog);
+  // writeln(logs, s);
+  writeln(logs, 'pl = ', user);
+  writeln(logs, 's = ', s);
+  writeln(logs, 'prog = ', prog);
   if s.Split([';'])[1] = 'kumir' then
   begin
     for i := 0 to High(tasks) do
@@ -1101,7 +1338,7 @@ begin
       Result := Result + '"' + tasks[i] + '":' + Players[userindex].IsAccess[i]
         .ToInteger.ToString + ',';
     if Result[length(Result)] = ',' then
-      delete(Result, length(Result), 1);
+      Delete(Result, length(Result), 1);
     Result := Result + '}';
   end
   else if s = 'gettab' then
@@ -1138,19 +1375,19 @@ begin
           Result := Result + '			},';
         end;
         if Result[length(Result)] = ',' then
-          delete(Result, length(Result), 1);
+          Delete(Result, length(Result), 1);
         Result := Result + '],' + #13#10;
         Result := Result + '		"tests": [';
         for j := Low(tasks_info[i].test) to High(tasks_info[i].test) do
           Result := Result + '"' + tasks_info[i].test[j] + '",';
         if Result[length(Result)] = ',' then
-          delete(Result, length(Result), 1);
+          Delete(Result, length(Result), 1);
         Result := Result + ']' + #13#10;
         Result := Result + '	},';
 
       end;
     if Result[length(Result)] = ',' then
-      delete(Result, length(Result), 1);
+      Delete(Result, length(Result), 1);
     Result := Result + ']';
   end
   else if s = 'getpos' then
@@ -1278,7 +1515,7 @@ begin
 
       end;
     if Result[length(Result)] = ',' then
-      delete(Result, length(Result), 1);
+      Delete(Result, length(Result), 1);
     Result := Result + ']';
 
   end
@@ -1392,7 +1629,7 @@ var
 var
   FS: TFileStream;
   Range: TIdEntityRange;
-  StartPos, EndPos: Int64;
+  StartPos, EndPos: int64;
 begin
   // ========= ban list =========
   for i := 0 to length(blacklisted) - 1 do
@@ -1448,7 +1685,7 @@ begin
             exit;
           end;
 
-       writeln(logs, s);
+      writeln(logs, s);
       if length(s.Split(['errordamp'])) > 1 then
       begin
         DampIp.Values[AThread.Binding.PeerIP] :=
@@ -1526,6 +1763,25 @@ begin
     AResponseInfo.ResponseNo := 403;
     exit;
   end;
+  if canlogin and ((Pos('registering', ARequestInfo.URI) < 3) and
+    (Pos('registering', ARequestInfo.URI) > 0)) then
+  begin
+
+    AResponseInfo.ContentText := registering(ARequestInfo.Params);
+    AResponseInfo.ResponseNo := 200;
+    exit;
+  end;
+  if  ((Pos('_can_i_register_.txt', ARequestInfo.URI) < 3) and
+    (Pos('_can_i_register_.txt', ARequestInfo.URI) > 0)) then
+  begin
+
+    if canlogin then
+      AResponseInfo.ContentText := 'YES'
+    else
+      AResponseInfo.ContentText := 'NO';
+    AResponseInfo.ResponseNo := 200;
+    exit;
+  end;
   if not FileExists(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
     ARequestInfo.URI) then
   begin
@@ -1535,7 +1791,7 @@ begin
   end
   else
     AResponseInfo.ResponseNo := 200;
-  if Pos('.PDF', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  if Pos('.PDF', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'application/pdf';
     AResponseInfo.ContentDisposition := 'inline; filename=' +
@@ -1545,20 +1801,19 @@ begin
       LoadDirectory + '\index' + ARequestInfo.URI);
     exit;
   end
-  else if Pos('.MP4', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.MP4', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     // AResponseInfo.ContentType := 'video/mp4';
-    {AResponseInfo.ContentDisposition := 'inline; filename=' +
+    { AResponseInfo.ContentDisposition := 'inline; filename=' +
       ExtractFileName(ExtractFilePath(ParamStr(0)) + LoadDirectory + '\index' +
       ARequestInfo.URI) + ';';
-    AResponseInfo.AcceptRanges := 'bytes';
-    AResponseInfo.ServeFile(AThread, ExtractFilePath(ParamStr(0)) +
-      LoadDirectory + '\index' + ARequestInfo.URI);     }
+      AResponseInfo.AcceptRanges := 'bytes';
+      AResponseInfo.ServeFile(AThread, ExtractFilePath(ParamStr(0)) +
+      LoadDirectory + '\index' + ARequestInfo.URI); }
 
     try
-      FS := TFileStream.Create(ExtractFilePath(ParamStr(0)) +
-      LoadDirectory + '\index' + ARequestInfo.URI,
-        fmOpenRead or fmShareDenyWrite);
+      FS := TFileStream.Create(ExtractFilePath(ParamStr(0)) + LoadDirectory +
+        '\index' + ARequestInfo.URI, fmOpenRead or fmShareDenyWrite);
     except
       AResponseInfo.ResponseNo := 500;
       exit;
@@ -1613,7 +1868,7 @@ begin
     end;
     exit;
   end
-  else if Pos('.AVI', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.AVI', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'video/x-msvideo';
     AResponseInfo.ContentDisposition := 'inline; filename=' +
@@ -1623,7 +1878,7 @@ begin
       LoadDirectory + '\index' + ARequestInfo.URI);
     exit;
   end
-  else if Pos('.DOCX', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.DOCX', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     // AResponseInfo.ContentType := 'application/msword';
     AResponseInfo.ContentDisposition := 'inline; filename=' +
@@ -1633,47 +1888,47 @@ begin
       LoadDirectory + '\index' + ARequestInfo.URI);
     exit;
   end
-  else if Pos('.MP3', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.MP3', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'audio/x-mpeg-3';
     img := true;
   end
-  else if Pos('.ICO', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.ICO', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'image/x-icon';
     img := true;
   end
-  else if Pos('.GIF', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.GIF', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'image/gif';
     img := true;
   end
-  else if Pos('.JPG', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.JPG', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'image/jpg';
     img := true;
   end
-  else if Pos('.JPEG', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.JPEG', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'image/jpeg';
     img := true;
   end
-  else if Pos('.BMP', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.BMP', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'image/bmp';
     img := true;
   end
-  else if Pos('.PNG', ANSIUPPERCASE(ARequestInfo.Document)) > 0 then
+  else if Pos('.PNG', AnsiUpperCase(ARequestInfo.Document)) > 0 then
   begin
     AResponseInfo.ContentType := 'image/png';
     img := true;
   end
-  else if (Pos('.CSS', ANSIUPPERCASE(ARequestInfo.Document)) > 0) then
+  else if (Pos('.CSS', AnsiUpperCase(ARequestInfo.Document)) > 0) then
   begin
     AResponseInfo.ContentType := 'text/css; charset=utf-8';
     img := false;
   end
-  else if (Pos('.KUM', ANSIUPPERCASE(ARequestInfo.Document)) > 0) then
+  else if (Pos('.KUM', AnsiUpperCase(ARequestInfo.Document)) > 0) then
   begin
     AResponseInfo.ContentType := 'text/plain; charset=utf-8';
     AResponseInfo.ContentText := LoadFileToStr2(ExtractFilePath(ParamStr(0)) +
@@ -1709,7 +1964,7 @@ var
   myi, myj: longint;
   task: ITask;
   iswork: boolean;
-  str: string;
+  str, str2: string;
 
 var
   files: TStringDynArray;
@@ -1748,7 +2003,7 @@ begin
     try
       if LoadDirectory = '' then
       begin
-        if (Trim(command) = '') then
+        if (trim(command) = '') then
         begin
         end
         else if (command.Split([' '])[0] = 'help') then
@@ -1828,6 +2083,26 @@ begin
             begin
               writeln('Not found log file');
             end;
+            // assign(FileCaptcha, ExtractFilePath(ParamStr(0)) +
+            // command.Split([' '])[1] + '\save\captcha.txt');
+            if FileExists(ExtractFilePath(ParamStr(0)) + command.Split([' '])[1]
+              + '\save\captcha.txt') then
+            begin
+              // reset(FileCaptcha);
+              // str := '';
+              // while (not eof(FileCaptcha)) do
+              // begin
+              // readln(FileCaptcha, str2);
+              // str := str + str2 + #13#10;
+              // end;
+              iniarr(LoadFileToStr(ExtractFilePath(ParamStr(0)) +
+                command.Split([' '])[1] + '\save\captcha.txt'));
+            end
+            else
+            begin
+              writeln('Not found captcha file');
+            end;
+            canlogin := false;
           end;
         end
         else if (command.Split([' '])[0] = 'l') then
@@ -1860,7 +2135,7 @@ begin
       end
       else
       begin
-        if (Trim(command) = '') then
+        if (trim(command) = '') then
         begin
         end
         else if (command.Split([' '])[0] = 'help') then
@@ -1871,8 +2146,10 @@ begin
           writeln('=============BACKUP=============');
           writeln('save - New backup');
           writeln('lres - Get list of backup');
-          writeln('lres <file> - set defaut file');
+          writeln('lres <file> - Set defaut file');
           writeln('=============PLAYER=============');
+          writeln('can_reg - Allow players to register');
+          writeln('cant_reg - Disallow players from registering');
           writeln('list - List all user');
           writeln('r_d - Reset all dollars for all players.');
           writeln('add <login> <password> - Add user');
@@ -1984,6 +2261,18 @@ begin
           Close(logs);
           writeln('exiting');
           LoadDirectory := '';
+          writeln('....OK');
+        end
+        else if (command.Split([' '])[0] = 'can_reg') then
+        begin
+          writeln('allowing');
+          canlogin := true;
+          writeln('....OK');
+        end
+        else if (command.Split([' '])[0] = 'cant_reg') then
+        begin
+          writeln('disallowing');
+          canlogin := false;
           writeln('....OK');
         end
         else if (command.Split([' '])[0] = 'save') then
