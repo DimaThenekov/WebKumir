@@ -101,6 +101,7 @@ var
   time_end: int64;
   logs: text;
   ArrForCaptcha: array of Aarraofstr;
+  tps: array[0..29] of int64;
   WordsForCaptcha: Aarraofstr;
   FileCaptcha: text;
   canlogin: boolean;
@@ -357,6 +358,7 @@ procedure saveini(var ini: TMemIniFile);
 var
   i, j, k: longint;
 begin
+  ini.Clear;
   ini.WriteInteger('Players', 'count', length(Players));
   for i := 0 to High(Players) do
   begin
@@ -1042,8 +1044,7 @@ begin
         Result := '“ур закончилс€ уже как ' +
           ((DateTimeToUnix(Now(), false) - time_end) div 60).ToString +
           ' минут ' + ((DateTimeToUnix(Now(), false) - time_end) mod 60)
-          .ToString +
-          ' секунд. Ќадеюсь мне хоть сникерс дадут за то, что € с вами седел, а не матан ботал.';
+          .ToString + ' секунд';
         exit;
       end;
 
@@ -1630,7 +1631,11 @@ var
   FS: TFileStream;
   Range: TIdEntityRange;
   StartPos, EndPos: int64;
+  startnow,endnow:TDateTime;
 begin
+  startnow:=Now;
+  try
+
   // ========= ban list =========
   for i := 0 to length(blacklisted) - 1 do
     If blacklisted[i] = AThread.Binding.PeerIP Then
@@ -1717,6 +1722,7 @@ begin
   begin
     AResponseInfo.ContentType := 'text/plain; charset=utf-8';
     AResponseInfo.ContentText := '__PrOtEcT_NoT_CoMpLeTeD__';
+    AResponseInfo.CacheControl := 'no-cache, must-revalidate';
     for i := Low(Players) to High(Players) do
       if Players[i].PFileName <> '' then
         if Players[i].PFileName + '.txt' = ARequestInfo.URI.Split
@@ -1745,6 +1751,7 @@ begin
     if length(ARequestInfo.URI.Split(['commands/'])[1].Split(['/', '\'])) > 1
     then
     begin
+      AResponseInfo.CacheControl := 'no-cache, must-revalidate';
       index := GetIndex(ARequestInfo.URI.Split(['commands/'])
         [1].Split(['/', '\'])[0]);
       if (index = -1) then
@@ -1771,9 +1778,10 @@ begin
     AResponseInfo.ResponseNo := 200;
     exit;
   end;
-  if  ((Pos('_can_i_register_.txt', ARequestInfo.URI) < 3) and
+  if ((Pos('_can_i_register_.txt', ARequestInfo.URI) < 3) and
     (Pos('_can_i_register_.txt', ARequestInfo.URI) > 0)) then
   begin
+    AResponseInfo.CacheControl := 'no-cache, must-revalidate';
 
     if canlogin then
       AResponseInfo.ContentText := 'YES'
@@ -1957,11 +1965,15 @@ begin
     AResponseInfo.ContentText := LoadFileToStr(ExtractFilePath(ParamStr(0)) +
       LoadDirectory + '\index' + ARequestInfo.URI);
 
+  finally
+    endnow:=Now;
+    tps[random(30)]:=MilliSecondsBetween(startnow,endnow)+1;
+  end;
 end;
 
 var
   sr: TSearchRec;
-  myi, myj: longint;
+  myi, myj, myk: longint;
   task: ITask;
   iswork: boolean;
   str, str2: string;
@@ -2164,6 +2176,7 @@ begin
           writeln('banip <ip> - Add an IP address to the server blacklist (not saved after restart)');
           writeln('iplist - Write iplist');
           writeln('cleariplist - Clear iplist');
+          writeln('rps - max requests per second');
           // ZipToFiles(
 
           SetLength(blacklisted, 0);
@@ -2362,31 +2375,77 @@ begin
           writeln('login: ' + command.Split([' '])[1]);
           writeln('....OK');
         end
+        else if (command.Split([' '])[0] = 'rps') then
+        begin
+          myj:=0;
+          myk:=0;
+          for myi := 0 to 29 do
+            if tps[myi]>0 then
+            begin
+              myj:= myj+(tps[myi]-1);
+              inc(myk);
+            end;
+          if myk=0 then
+            writeln('used mem: '+myk.ToString+' no request')
+          else
+          if myj=0 then
+            writeln('used mem: '+myk.ToString+' everything is very fast')
+          else
+            writeln('used mem: ',myk,' on request: ',(myj/myk):0:2,' rps: ',1000/(myj/myk):0:2);
+
+        end
         else if (command.Split([' '])[0] = 'del') then
         begin
-          if (command.Split([' '])[2] = '123456789') and
-            (command.Split([' '])[3] = '987654321') then
+          if length(command.Split([' '])) >= 4 then
           begin
-            writeln('deleting');
-            // Players[GetIndex(command.Split([' '])[1])] :=
-            // Players[High(Players)];
-            // Players[High(Players)].Free;
-            // SetLength(Players, length(Players) - 1);
-            writeln('This command was removed because it created a lot of problems.');
-            writeln('You can delete a player via files.');
-            writeln('Do not forget to remove all links from files (eg links from dollars) to this player.');
-            // writeln('login: ' + command.Split([' '])[1]);
-            // writeln('....OK');
+            if (command.Split([' '])[2] = '123456789') and
+              (command.Split([' '])[3] = '987654321') then
+            begin
+              writeln('deleting');
+              if GetIndex(command.Split([' '])[1]) = -1 then
+              begin
+                writeln('deleting');
+                writeln('login not found');
+                writeln('....OK');
+              end
+              else
+              begin
+                myj:=GetIndex(command.Split([' '])[1]);
+                Players[myj].Free;
+                Players[myj] :=
+                  Players[High(Players)];
+                for myi := 0 to map.ReadInteger('Count', 'dollar', 0) - 1 do
+                begin
+                  if map.ReadInteger('D:' + myi.ToString, 'getit', -1)=myj then
+                     map.WriteInteger('D:' + myi.ToString, 'getit', -1);
+                  if map.ReadInteger('D:' + myi.ToString, 'getit', -1)=High(Players) then
+                     map.WriteInteger('D:' + myi.ToString, 'getit', myj);
+                end;
+                SetLength(Players, length(Players) - 1);
+
+                // writeln('This command was removed because it created a lot of problems.');
+                // writeln('You can delete a player via files.');
+                // writeln('Do not forget to remove all links from files (eg links from dollars) to this player.');
+                writeln('login: ' + command.Split([' '])[1]);
+                writeln('....OK');
+              end;
+            end
+            else
+            begin
+              writeln('deleting');
+              if (command.Split([' '])[2] <> '123456789') then
+                writeln(command.Split([' '])[2] + ' != 123456789');
+              if (command.Split([' '])[3] <> '987654321') then
+                writeln(command.Split([' '])[3] + ' != 987654321');
+              writeln('....Error');
+            end;
           end
           else
           begin
             writeln('deleting');
-            if (command.Split([' '])[2] <> '123456789') then
-              writeln(command.Split([' '])[2] + ' != 123456789');
-            if (command.Split([' '])[3] <> '987654321') then
-              writeln(command.Split([' '])[3] + ' != 987654321');
+            writeln('not found "123456789 987654321"');
             writeln('....Error');
-          end
+          end;
         end
         else if (command.Split([' '])[0] = 'r_d') then
         begin
