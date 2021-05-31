@@ -21,7 +21,8 @@ uses
   Math,
   IdGlobal,
   IdURI,
-  IdHTTPHeaderInfo;
+  IdHTTPHeaderInfo,
+  Vcl.ClipBrd;
 
 Type
   TCommandHandler = class
@@ -435,6 +436,8 @@ begin
     end
     else
     begin
+      if i + 2>length(s) then
+        break;
       Result := Result + chr((ord(s[i + 1]) - ord('0')) * 10 + (ord(s[i + 2]) - ord('0')));
       inc(i);
       inc(i);
@@ -448,7 +451,7 @@ var
 begin
   Result := '';
   for i := 1 to length(s) do
-    if (s[i] = ' ') or (s[i] > '#') then
+    if (s[i] = ' ') or ((s[i] > '#') and (s[i] <> '=')) then
     begin
       Result := Result + s[i];
     end
@@ -1462,7 +1465,8 @@ begin
     else if j = 0 then
       Result := 'Использовано памяти для усреднения: ' + k.ToString + #13#10 + 'Всё мгновенно (<1мс)'
     else
-      Result := 'Использовано памяти для усреднения: ' + k.ToString + #13#10 + 'На запрос в среднем: '+ FloatToStrF((j / k), ffFixed, 10, 2)+ ' мс' + #13#10 + 'С этой нагрузкой сервер может выдержать '+ FloatToStrF(1000 / (j / k), ffFixed, 10, 2)+' запросов в секунду';
+      Result := 'Использовано памяти для усреднения: ' + k.ToString + #13#10 + 'На запрос в среднем: ' + FloatToStrF((j / k), ffFixed, 10, 2) + ' мс' + #13#10 +
+        'С этой нагрузкой сервер может выдержать ' + FloatToStrF(1000 / (j / k), ffFixed, 10, 2) + ' запросов в секунду';
 
   end
   else if (s = 'exestrings') then
@@ -1538,15 +1542,16 @@ begin
         end;
         k := GetIndex(s4);
         for j := 0 to High(Players[k].pos) do
-          if Players[k].pos[j].uniID=s3 then
-          begin
-            Players[k].pos[j].Free;
-            Players[k].pos[j] := Players[k].pos[High(Players[k].pos)];
-            SetLength(Players[k].pos, length(Players[k].pos) - 1);
-          end;
+          if Players[k].pos[j].uniID = s3 then
+              begin
+                Players[k].pos[j].Free;
+                Players[k].pos[j] := Players[k].pos[High(Players[k].pos)];
+                SetLength(Players[k].pos, length(Players[k].pos) - 1);
+                break;
+              end;
         Result := Result + 'OK' + #13#10;
       end;
-      if (pos('comand_access_del', s2) = 1) then
+      if (pos('comand_access_del_', s2) = 1) then
       begin
         if s4 = '' then
         begin
@@ -1559,13 +1564,18 @@ begin
           break;
         end;
         k := GetIndex(s4);
-        //Players[k].Free;
-        //Players[k] := Players[High(Players)];
-        //SetLength(Players, length(Players) - 1);
-        //s4 := '';
+        for j := 0 to High(Players[k].IsAccess) do
+          if Players[k].IsAccess[j].uniID = s3 then
+            if Players[k].IsAccess[j].pos.ToString = s2.Split(['comand_access_del_'])[1] then
+            begin
+              Players[k].IsAccess[j].Free;
+              Players[k].IsAccess[j] := Players[k].IsAccess[High(Players[k].IsAccess)];
+              SetLength(Players[k].IsAccess, length(Players[k].IsAccess) - 1);
+              break;
+            end;
         Result := Result + 'OK' + #13#10;
       end;
-      if (pos('comand_dor_del', s2) = 1) then
+      if (pos('comand_dor_del_', s2) = 1) then
       begin
         if s4 = '' then
         begin
@@ -1578,10 +1588,15 @@ begin
           break;
         end;
         k := GetIndex(s4);
-        //Players[k].Free;
-        //Players[k] := Players[High(Players)];
-        //SetLength(Players, length(Players) - 1);
-        //s4 := '';
+        for j := 0 to High(Players[k].Dors) do
+          if Players[k].Dors[j].uniID = s3 then
+            if Players[k].Dors[j].pos.ToString = s2.Split(['comand_dor_del_'])[1] then
+            begin
+              Players[k].Dors[j].Free;
+              Players[k].Dors[j] := Players[k].Dors[High(Players[k].Dors)];
+              SetLength(Players[k].Dors, length(Players[k].Dors) - 1);
+              break;
+            end;
         Result := Result + 'OK' + #13#10;
       end;
       if (pos('comand_re_login_', s2) = 1) then
@@ -1818,9 +1833,9 @@ begin
   userindex := GetIndex(user);
 
   // writeln(logs, s);
-  writeln(logs, 'pl = ', user);
-  writeln(logs, 's = ', s);
-  writeln(logs, 'prog = ', prog);
+  writeln(logs, 'pl = ', MyTXT2INI(user));
+  writeln(logs, 's = ', MyTXT2INI(TIdURI.URLDecode(StringReplace(s, '+', ' ', [rfReplaceAll, rfIgnoreCase]))));
+  writeln(logs, 'prog = ', MyTXT2INI(TIdURI.URLDecode(StringReplace(prog, '+', ' ', [rfReplaceAll, rfIgnoreCase]))));
   if s.Split([';'])[1] = 'kumir' then
   begin
     f := 1;
@@ -2834,7 +2849,7 @@ begin
               exit;
             end;
 
-        writeln(logs, s);
+        writeln(logs, MyTXT2INI(TIdURI.URLDecode(StringReplace(s, '+', ' ', [rfReplaceAll, rfIgnoreCase]))));
         if length(s.Split(['errordamp'])) > 1 then
         begin
           DampIp.Values[AThread.Binding.PeerIP] := IntToStr(DateTimeToUnix(Now(), false));
@@ -3162,9 +3177,21 @@ var
 
 begin
   LoadDirectory := ExtractFilePath(ParamStr(0)) + 'WebKumirFiles';
+  if (not DirectoryExists(LoadDirectory)) then
+  begin
+    writeln('...Creating proj-folder');
+    try
+
+      GetResource('index', LoadDirectory);
+    except
+      on e: Exception do
+        writeln('Error ' + e.ClassName + ' : ' + e.Message);
+    end;
+  end;
   Server := TIdHTTPServer.Create(nil);
   CH := TCommandHandler.Create;
   Server.OnCommandGet := CH.CommandGet;
+  iswork := true;
   task := TTask.Create(
     procedure()
     begin
@@ -3180,23 +3207,23 @@ begin
   admin_of_admin := TAdmin.Create;
   // SetLength(kumirprogs, 0);
   SetLength(blacklisted, 0);
-  assign(logs, LoadDirectory + '\projects\log.txt');
-  if FileExists(LoadDirectory + '\projects\log.txt') then
-    append(logs);
-  iniarr(LoadFileToStr(LoadDirectory + '\projects\captcha.txt'));
-  iswork := true;
-  task.Start;
-  Loadini();
-  writeln('');
-  writeln('');
-  writeln('');
-  writeln('       Enter the port       |           Введите порт           ');
-  writeln(' to start the admin console | для старта консоли администратора');
-  writeln('        Default: 80         |        По умолчанию: 80          ');
-  write('Port: ');
   try
+    assign(logs, LoadDirectory + '\projects\log.txt',CP_UTF8);
+    if FileExists(LoadDirectory + '\projects\log.txt') then
+      append(logs);
+
+    iniarr(LoadFileToStr(LoadDirectory + '\projects\captcha.txt'));
+    Loadini();
+    writeln('');
+    writeln('');
+    writeln('');
+    writeln('       Enter the port       |           Введите порт           ');
+    writeln(' to start the admin console | для старта консоли администратора');
+    writeln('        Default: 80         |        По умолчанию: 80          ');
+    write('Port: ');
     readln(myport);
     writeln('');
+    randomize();
     admin_of_admin.name := 'admin' + (random(90) + 10).ToString;
     admin_of_admin.password := 'pas' + (random(90000000) + 10000000).ToString;
     writeln('    To manage the server    |      Для управления сервером     ');
@@ -3207,6 +3234,7 @@ begin
     writeln('');
     Server.DefaultPort := myport;
     Server.Active := true;
+    task.Start;
     if myport <> 80 then
     begin
       writeln('For all computer:     ' + GetIP() + ':' + myport.ToString + '     - Для всех компьютеров');
@@ -3219,26 +3247,37 @@ begin
     end;
     writeln('');
     writeln('     To open this site      |     Для открытия этого сайта     ');
-    writeln('    write "o" or "open"     |      напишите o или открыть      ');
+    writeln('    write "o" or "open"     |    напишите "o" или "открыть"    ');
+    writeln('');
+    writeln('     To copy this site      |     Для копирование этого сайта  ');
+    writeln('       write "copy"         |        напишите "копировать"     ');
     writeln('');
     while true do
     begin
       write('>');
       readln(str);
-      str := trim(str);
+      str := trim(str).ToLower;
       if (str = 'o') or (str = 'open') or (str = 'о') or (str = 'открыть') then
       begin
         writeln('         Opening...         |            Открытие...           ');
-        ShellExecute(0, 'open', PChar('http://localhost:' + myport.ToString + '/'), nil, nil, SW_SHOWNORMAL);
+        ShellExecute(0, 'open', PChar('http://localhost:' + myport.ToString + '/login.html#login='+admin_of_admin.name+'&password='+admin_of_admin.password), nil, nil, SW_SHOWNORMAL);
         writeln('');
 
       end;
+      if (str = 'copy') or (str = 'копировать') then
+      begin
+        writeln('         Copying...         |           Копирование...         ');
+        Clipboard.Clear;
+        Clipboard.AsText:=('http://localhost:' + myport.ToString + '/login.html#login='+admin_of_admin.name+'&password='+admin_of_admin.password);
+        writeln('');
+
+      end;
+
       if (str = 'autosave') or (str = 'save') or (str = 'сохранить') or (str = 'сохрн') then
       begin
         writeln('         Saving...          |           Сохранение...          ');
         SaveAll(false);
         writeln('');
-
       end;
 
     end;
