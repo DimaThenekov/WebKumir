@@ -2540,6 +2540,11 @@ begin
             k := 1;
             break;
           end;
+        if '' = trim(RunProjects[i].group) then
+        begin
+          k := 1;
+        end;
+
         if k = 0 then
           continue;
 
@@ -2617,7 +2622,7 @@ begin
       else
       begin
         for i := 0 to High(RunProjects) do
-          if RunProjects[i].uniID = s.Split(['_'])[7] then
+          if RunProjects[i].uniID = s.Split(['_'])[8] then
           begin
             Result := 'uniID занят';
             exit;
@@ -2632,7 +2637,7 @@ begin
         RunProjects[High(RunProjects)].time_freeze := s.Split(['_'])[5].ToInt64 div 1000;
         RunProjects[High(RunProjects)].time_end := s.Split(['_'])[6].ToInt64 div 1000;
         if (s.Split(['_'])[7] = 'All') then
-          RunProjects[High(RunProjects)].group := ',gr_player_' + trim(Players[userindex].login) + ',gr_' + trim(Players[userindex].login);
+          RunProjects[High(RunProjects)].group := '';
         if (s.Split(['_'])[7] = 'Gr') then
           RunProjects[High(RunProjects)].group := 'gr_player_' + trim(Players[userindex].login) + ',gr_' + trim(Players[userindex].login);
         if (s.Split(['_'])[7] = 'OnlyYou') then
@@ -3232,7 +3237,7 @@ begin
     admin_of_admin.password := 'pas' + (random(90000000) + 10000000).ToString;
     if FileExists('auto.txt') then
     begin
-      myport := LoadFileToStr('auto.txt').Trim().ToInteger;
+      myport := LoadFileToStr('auto.txt').trim().ToInteger;
       writeln(myport);
       ShellExecute(0, 'open', PChar('http://localhost:' + myport.ToString + '/login.html?auto=true&login=' + admin_of_admin.name + '&password=' + admin_of_admin.password), nil, nil, SW_SHOWNORMAL);
     end
