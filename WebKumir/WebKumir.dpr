@@ -206,31 +206,39 @@ var
   ExecInfo: TShellExecuteInfo;
   NeedUnitialize: boolean;
 begin
-  Assert(AFileName <> '');
-
-  NeedUnitialize := Succeeded(CoInitializeEx(nil, COINIT_APARTMENTTHREADED or COINIT_DISABLE_OLE1DDE));
   try
-    FillChar(ExecInfo, SizeOf(ExecInfo), 0);
-    ExecInfo.cbSize := SizeOf(ExecInfo);
+    Assert(AFileName <> '');
 
-    ExecInfo.Wnd := AWnd;
-    ExecInfo.lpVerb := Pointer(AOperation);
-    ExecInfo.lpFile := PChar(AFileName);
-    ExecInfo.lpParameters := Pointer(AParameters);
-    ExecInfo.lpDirectory := Pointer(ADirectory);
-    ExecInfo.nShow := AShowCmd;
-    ExecInfo.fMask := SEE_MASK_NOASYNC { = SEE_MASK_FLAG_DDEWAIT для старых версий Delphi }
-      or SEE_MASK_FLAG_NO_UI;
-{$IFDEF UNICODE}
-    // Необязательно, см. http://www.transl-gunsmoker.ru/2015/01/what-does-SEEMASKUNICODE-flag-in-ShellExecuteEx-actually-do.html
-    ExecInfo.fMask := ExecInfo.fMask or SEE_MASK_UNICODE;
-{$ENDIF}
-{$WARN SYMBOL_PLATFORM OFF}
-    Win32Check(ShellExecuteEx(@ExecInfo));
-{$WARN SYMBOL_PLATFORM ON}
-  finally
-    if NeedUnitialize then
-      CoUninitialize;
+    NeedUnitialize := Succeeded(CoInitializeEx(nil, COINIT_APARTMENTTHREADED or COINIT_DISABLE_OLE1DDE));
+    try
+      FillChar(ExecInfo, SizeOf(ExecInfo), 0);
+      ExecInfo.cbSize := SizeOf(ExecInfo);
+
+      ExecInfo.Wnd := AWnd;
+      ExecInfo.lpVerb := Pointer(AOperation);
+      ExecInfo.lpFile := PChar(AFileName);
+      ExecInfo.lpParameters := Pointer(AParameters);
+      ExecInfo.lpDirectory := Pointer(ADirectory);
+      ExecInfo.nShow := AShowCmd;
+      ExecInfo.fMask := SEE_MASK_NOASYNC { = SEE_MASK_FLAG_DDEWAIT для старых версий Delphi }
+        or SEE_MASK_FLAG_NO_UI;
+  {$IFDEF UNICODE}
+      // Необязательно, см. http://www.transl-gunsmoker.ru/2015/01/what-does-SEEMASKUNICODE-flag-in-ShellExecuteEx-actually-do.html
+      ExecInfo.fMask := ExecInfo.fMask or SEE_MASK_UNICODE;
+  {$ENDIF}
+  {$WARN SYMBOL_PLATFORM OFF}
+      Win32Check(ShellExecuteEx(@ExecInfo));
+  {$WARN SYMBOL_PLATFORM ON}
+    finally
+      if NeedUnitialize then
+        CoUninitialize;
+    end;
+  except
+      on e: Exception do
+      begin
+        writeln('Error ' + e.ClassName + ' : ' + e.Message + ' : ' + e.StackTrace + ' : ' + e.UnitScope + ' : ' + e.UnitName);
+        exit;
+      end;
   end;
 end;
 
