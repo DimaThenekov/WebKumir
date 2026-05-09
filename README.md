@@ -1,3 +1,5 @@
+# Перенесено в [WebKumir4](https://github.com/DimaThenekov/WebKumir4)
+
 # WebKumir
 For kumir competitions
 
